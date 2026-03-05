@@ -6,6 +6,7 @@ on:
       release_tag:
         description: "Release tag in FileUni-Community (for example: v1.2.3)"
         required: true
+        default: "0.0.1-alpha4.1"
       workspace_ref:
         description: "Source ref in fileuni/FileUni-WorkSpace (tag/branch/sha). Empty = release_tag"
         required: false
@@ -13,12 +14,12 @@ on:
       build_mode:
         description: "Build mode override (full/medium/lite/minimal). Empty = vars.BUILD_MODE then minimal"
         required: false
-        default: ""
+        default: "minimal"
       prerelease:
         description: "Mark this GitHub release as pre-release"
         type: boolean
         required: false
-        default: false
+        default: true
       trigger_source:
         description: "Who triggered this release"
         required: false
@@ -160,6 +161,7 @@ jobs:
         working-directory: workspace
         env:
           BUILD_REPORT_DIR: ${{ runner.temp }}/fileuni-build-report
+          APPIMAGE_EXTRACT_AND_RUN: "1"
         run: |
           set -euo pipefail
           rm -rf "$OUTPUT_DIR"
