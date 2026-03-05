@@ -38,6 +38,7 @@ jobs:
       WORKSPACE_REPO: fileuni/FileUni-WorkSpace
       OUTPUT_DIR: /tmp/FileUniRelease
       DEFAULT_WORKSPACE_REF: main
+      CARGO_TOOLS_ROOT: /home/runner/.cargo-tools
     steps:
       - name: Validate required secret
         env:
@@ -146,6 +147,8 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: "1.25.x"
+          cache: true
+          cache-dependency-path: workspace/script/go.sum
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -154,6 +157,47 @@ jobs:
         uses: mlugg/setup-zig@v2
         with:
           version: "0.15.2"
+
+      - name: Cache cargo installed tools
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/.cargo-tools
+          key: ${{ runner.os }}-cargo-tools-v1-tauri2_10
+          restore-keys: |
+            ${{ runner.os }}-cargo-tools-v1-
+
+      - name: Add cargo tools to PATH
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "${CARGO_TOOLS_ROOT}/bin" >> "$GITHUB_PATH"
+
+      - name: Cache Cargo registry and git index
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('workspace/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache Rust target directory
+        uses: actions/cache@v4
+        with:
+          path: workspace/target
+          key: ${{ runner.os }}-cargo-target-${{ steps.meta.outputs.resolved_mode }}-${{ hashFiles('workspace/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-target-${{ steps.meta.outputs.resolved_mode }}-
+            ${{ runner.os }}-cargo-target-
+
+      - name: Cache Bun package downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-cache-${{ hashFiles('workspace/**/bun.lock', 'workspace/**/bun.lockb') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-cache-
 
       - name: Prepare build dependencies
         shell: bash
@@ -167,9 +211,20 @@ jobs:
             libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf
           sudo apt-get install -y upx-ucl || sudo apt-get install -y upx
           sudo gem install --no-document fpm
-          cargo install cargo-zigbuild --locked
-          cargo install cargo-xwin --locked
-          cargo install tauri-cli --version 2.10.2 --locked
+
+          if ! command -v cargo-zigbuild > /dev/null 2>&1; then
+            cargo install cargo-zigbuild --root "$CARGO_TOOLS_ROOT" --locked
+          fi
+
+          if ! command -v cargo-xwin > /dev/null 2>&1; then
+            cargo install cargo-xwin --root "$CARGO_TOOLS_ROOT" --locked
+          fi
+
+          if ! command -v cargo-tauri > /dev/null 2>&1; then
+            cargo install tauri-cli --version '~2.10' --root "$CARGO_TOOLS_ROOT" --locked
+          fi
+
+          cargo tauri --version
 
       - name: Build release artifacts
         shell: bash
