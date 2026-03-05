@@ -68,7 +68,6 @@ jobs:
             --release-tag "${{ inputs.release_tag }}" \
             --workspace-ref "${{ inputs.workspace_ref }}" \
             --build-mode "${{ inputs.build_mode }}" \
-            --build-mode-var "${{ vars.BUILD_MODE }}" \
             --prerelease "${{ inputs.prerelease }}" \
             --trigger-source "${{ inputs.trigger_source }}" \
             --workspace-repo "${WORKSPACE_REPO}" \
@@ -156,23 +155,106 @@ jobs:
             --tauri-version "~2.10"
 
       - name: Build release artifacts
+        id: build_release
         shell: bash
         working-directory: workspace
+        env:
+          BUILD_REPORT_DIR: ${{ runner.temp }}/fileuni-build-report
         run: |
           set -euo pipefail
           rm -rf "$OUTPUT_DIR"
           mkdir -p "$OUTPUT_DIR"
+          rm -rf "$BUILD_REPORT_DIR"
+          mkdir -p "$BUILD_REPORT_DIR"
 
-          go run script/tools.go release:build-all "${{ steps.meta.outputs.resolved_mode }}" --output-dir "$OUTPUT_DIR"
-          go run script/tools.go ci:assert-artifacts --output-dir "$OUTPUT_DIR"
+          set +e
+          go run script/tools.go release:build-all "${{ steps.meta.outputs.resolved_mode }}" --output-dir "$OUTPUT_DIR" 2>&1 | tee "$BUILD_REPORT_DIR/release-build.log"
+          build_exit=${PIPESTATUS[0]}
+          if [ "$build_exit" -eq 0 ]; then
+            go run script/tools.go ci:assert-artifacts --output-dir "$OUTPUT_DIR" 2>&1 | tee "$BUILD_REPORT_DIR/assert-artifacts.log"
+            assert_exit=${PIPESTATUS[0]}
+          else
+            echo "skip ci:assert-artifacts because build failed" | tee "$BUILD_REPORT_DIR/assert-artifacts.log"
+            assert_exit=1
+          fi
+          set -e
+
+          if [ "$build_exit" -eq 0 ] && [ "$assert_exit" -eq 0 ]; then
+            echo "status=success" >> "$GITHUB_OUTPUT"
+            echo "exit_code=0" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=failed" >> "$GITHUB_OUTPUT"
+            if [ "$build_exit" -ne 0 ]; then
+              echo "exit_code=$build_exit" >> "$GITHUB_OUTPUT"
+            else
+              echo "exit_code=$assert_exit" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+      - name: Generate CLI and GUI build report
+        if: always()
+        shell: bash
+        env:
+          BUILD_REPORT_DIR: ${{ runner.temp }}/fileuni-build-report
+        run: |
+          set -euo pipefail
+          RELEASE_LOG="$BUILD_REPORT_DIR/release-build.log"
+
+          gui_summary="$(grep -E "GUI formats (succeeded|failed):" "$RELEASE_LOG" | tail -n 2 || true)"
+          cli_summary="$(grep -E "CLI formats (succeeded|failed):" "$RELEASE_LOG" | tail -n 2 || true)"
+          gui_target_lines="$(grep -E "GUI target:|gui:|fileuni-gui|appimage|tauri build|error:" "$RELEASE_LOG" | tail -n 80 || true)"
+          cli_target_lines="$(grep -E "CLI target:|cli:|cargo zigbuild|fileuni |error:" "$RELEASE_LOG" | tail -n 80 || true)"
+
+          {
+            echo "## CLI / GUI Build Result"
+            echo ""
+            echo "- Mode: \`${{ steps.meta.outputs.resolved_mode }}\`"
+            echo "- Build status: \`${{ steps.build_release.outputs.status }}\`"
+            echo "- Exit code: \`${{ steps.build_release.outputs.exit_code }}\`"
+            echo ""
+            echo "| Component | Status | Formats Succeeded | Formats Failed |"
+            echo "|---|---|---|---|"
+
+            gui_ok="$(echo "$gui_summary" | sed -n '1p' | sed 's/.*GUI formats succeeded: //')"
+            gui_fail="$(echo "$gui_summary" | sed -n '2p' | sed 's/.*GUI formats failed: //')"
+            cli_ok="$(echo "$cli_summary" | sed -n '1p' | sed 's/.*CLI formats succeeded: //')"
+            cli_fail="$(echo "$cli_summary" | sed -n '2p' | sed 's/.*CLI formats failed: //')"
+
+            [ -n "$gui_ok" ] || gui_ok="none"
+            [ -n "$gui_fail" ] || gui_fail="none"
+            [ -n "$cli_ok" ] || cli_ok="none"
+            [ -n "$cli_fail" ] || cli_fail="none"
+
+            gui_status="success"
+            cli_status="success"
+            [ "$gui_fail" = "none" ] || gui_status="failed"
+            [ "$cli_fail" = "none" ] || cli_status="failed"
+
+            echo "| GUI | ${gui_status} | ${gui_ok} | ${gui_fail} |"
+            echo "| CLI | ${cli_status} | ${cli_ok} | ${cli_fail} |"
+            echo ""
+            echo "### GUI Key Log Lines"
+            echo '```text'
+            echo "$gui_target_lines"
+            echo '```'
+            echo ""
+            echo "### CLI Key Log Lines"
+            echo '```text'
+            echo "$cli_target_lines"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload workflow artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: release-all-${{ steps.meta.outputs.release_tag }}
-          path: /tmp/FileUniRelease/*
+          path: |
+            /tmp/FileUniRelease/*
+            !/tmp/FileUniRelease/_build_report/**
 
       - name: Publish GitHub Release in community repo via Go script
+        if: steps.build_release.outputs.status == 'success'
         env:
           GITHUB_TOKEN: ${{ github.token }}
         shell: bash
@@ -189,6 +271,7 @@ jobs:
             --token-env "GITHUB_TOKEN"
 
       - name: Add workflow summary via Go script
+        if: always()
         shell: bash
         run: |
           set -euo pipefail
@@ -198,3 +281,11 @@ jobs:
             --build-mode "${{ steps.meta.outputs.resolved_mode }}" \
             --prerelease "${{ steps.meta.outputs.resolved_prerelease }}" \
             --trigger-source "${{ steps.meta.outputs.trigger_source }}"
+
+      - name: Fail workflow when build failed
+        if: always() && steps.build_release.outputs.status != 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::error::Build failed. See CLI/GUI build result table and logs in workflow summary."
+          exit 1
