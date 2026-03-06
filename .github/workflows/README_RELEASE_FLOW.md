@@ -6,14 +6,25 @@ The pipeline is dispatched from `FileUni-WorkSpace` or manually triggered.
 
 ## Workflow
 - Workflow: `NewBuildReleaesByZig.yml`
-- Trigger: `workflow_dispatch`
+- Trigger: `workflow_dispatch` (manual or API-dispatched from workspace orchestrator)
 - Required secret: `FILEUNI_WORKSPACE_PAT`
+
+## Trigger Source
+- Source tags are pushed in `fileuni/FileUni-WorkSpace`.
+- Workspace orchestrator `.github/workflows/trigger-community-release.yml` triggers this workflow in `FileUni-Community`.
+- `FileUni-Community` workflow itself no longer uses direct tag-push trigger.
 
 ## Current Design
 The release pipeline is based on:
 - `workspace/build.zig`
 - `workspace/script-new-zig/`
 - this workflow file
+
+Runner orchestration is matrix-driven:
+- `linux_windows` profile builds linux/windows/bsd artifacts on Ubuntu.
+- `apple` profile builds macOS CLI/GUI artifacts (including dmg/ipa) on macOS.
+- `android` profile builds Android artifacts (including apk) on Ubuntu with Android SDK.
+- Profiles are defined in `workspace/script-new-zig/build_matrix.jsonc` under `ci_profiles`.
 
 Legacy script backends have been removed from the workspace.
 

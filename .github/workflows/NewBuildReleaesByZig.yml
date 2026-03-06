@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "Release label to publish in FileUni-Community (e.g., v1.2.3); source code comes from `workspace_ref` or defaults to main"
+        description: "Release label for FileUni-Community (e.g., v1.2.3); source defaults to main when workspace_ref is empty"
         required: true
         default: "v0.0.1-alpha.1"
       workspace_ref:
-        description: "Source ref in fileuni/FileUni-WorkSpace (tag/branch/sha). Empty = release_tag"
+        description: "Source ref in fileuni/FileUni-WorkSpace (branch/tag/sha). Empty means main"
         required: false
         default: ""
       build_mode:
@@ -21,7 +21,7 @@ on:
         required: false
         default: true
       strict_packaging:
-        description: "Fail when optional packagers/signing are missing"
+        description: "Fail when optional packagers/signing tools are missing"
         type: boolean
         required: false
         default: true
@@ -34,7 +34,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: fileuni-community-new-zig-release-${{ inputs.release_tag || github.run_id }}
+  group: fileuni-community-new-zig-release-${{ github.event.inputs.release_tag || github.run_id }}
   cancel-in-progress: false
 
 env:
@@ -51,6 +51,14 @@ jobs:
       resolved_prerelease: ${{ steps.meta.outputs.resolved_prerelease }}
       trigger_source: ${{ steps.meta.outputs.trigger_source }}
       strict_packaging: ${{ steps.strict.outputs.strict_packaging }}
+      has_android_target: ${{ steps.cap.outputs.has_android_target }}
+      has_apple_target: ${{ steps.cap.outputs.has_apple_target }}
+      linux_windows_apps: ${{ steps.cap.outputs.linux_windows_apps }}
+      linux_windows_include_glob: ${{ steps.cap.outputs.linux_windows_include_glob }}
+      apple_apps: ${{ steps.cap.outputs.apple_apps }}
+      apple_include_glob: ${{ steps.cap.outputs.apple_include_glob }}
+      android_apps: ${{ steps.cap.outputs.android_apps }}
+      android_include_glob: ${{ steps.cap.outputs.android_include_glob }}
     steps:
       - name: Checkout workspace source (bootstrap)
         uses: actions/checkout@v4
@@ -77,6 +85,46 @@ jobs:
           set -euo pipefail
           zig build release-run -- preflight:ci
 
+      - name: Normalize release inputs
+        id: normalized
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_tag="${{ github.event.inputs.release_tag }}"
+          workspace_ref="${{ github.event.inputs.workspace_ref }}"
+          build_mode="${{ github.event.inputs.build_mode }}"
+          prerelease="${{ github.event.inputs.prerelease }}"
+          trigger_source="${{ github.event.inputs.trigger_source }}"
+          strict_packaging_input="${{ github.event.inputs.strict_packaging }}"
+
+          if [ -z "${release_tag}" ]; then
+            release_tag="v0.0.0-${GITHUB_RUN_NUMBER}"
+          fi
+          if [ -z "${workspace_ref}" ]; then
+            workspace_ref="${DEFAULT_WORKSPACE_REF}"
+          fi
+          if [ -z "${build_mode}" ]; then
+            build_mode="full"
+          fi
+          if [ -z "${prerelease}" ]; then
+            prerelease="true"
+          fi
+          if [ -z "${trigger_source}" ]; then
+            trigger_source="manual"
+          fi
+          if [ -z "${strict_packaging_input}" ]; then
+            strict_packaging_input="true"
+          fi
+
+          {
+            echo "release_tag=${release_tag}"
+            echo "workspace_ref=${workspace_ref}"
+            echo "build_mode=${build_mode}"
+            echo "prerelease=${prerelease}"
+            echo "trigger_source=${trigger_source}"
+            echo "strict_packaging=${strict_packaging_input}"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Resolve release metadata and source ref
         id: meta
         env:
@@ -86,11 +134,11 @@ jobs:
         run: |
           set -euo pipefail
           zig build release-run -- ci:resolve-community-build \
-            --release-tag "${{ inputs.release_tag }}" \
-            --workspace-ref "${{ inputs.workspace_ref }}" \
-            --build-mode "${{ inputs.build_mode }}" \
-            --prerelease "${{ inputs.prerelease }}" \
-            --trigger-source "${{ inputs.trigger_source }}" \
+            --release-tag "${{ steps.normalized.outputs.release_tag }}" \
+            --workspace-ref "${{ steps.normalized.outputs.workspace_ref }}" \
+            --build-mode "${{ steps.normalized.outputs.build_mode }}" \
+            --prerelease "${{ steps.normalized.outputs.prerelease }}" \
+            --trigger-source "${{ steps.normalized.outputs.trigger_source }}" \
             --workspace-repo "${WORKSPACE_REPO}" \
             --workspace-token-env "FILEUNI_WORKSPACE_PAT" \
             --fallback-ref "${{ vars.WORKSPACE_DEFAULT_REF }}" \
@@ -101,7 +149,51 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "strict_packaging=${{ inputs.strict_packaging }}" >> "$GITHUB_OUTPUT"
+          strict_packaging="${{ steps.normalized.outputs.strict_packaging }}"
+          echo "strict_packaging=${strict_packaging}" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve capability flags from build matrix
+        id: cap
+        shell: bash
+        working-directory: workspace
+        run: |
+          set -euo pipefail
+          MATRIX_FILE="script-new-zig/build_matrix.jsonc"
+          MODE="${{ steps.meta.outputs.resolved_mode }}"
+
+          jq -e --arg mode "$MODE" '.[$mode]' "$MATRIX_FILE" >/dev/null
+
+          has_android_target="$(jq -r --arg mode "$MODE" '
+            (
+              (.[$mode].cli.targets // []) +
+              (.[$mode].gui.targets // [])
+            ) | any(. == "aarch64-linux-android")
+          ' "$MATRIX_FILE")"
+
+          has_apple_target="$(jq -r --arg mode "$MODE" '
+            (
+              (.[$mode].cli.targets // []) +
+              (.[$mode].gui.targets // [])
+            ) | any(test("-apple-darwin$"))
+          ' "$MATRIX_FILE")"
+
+          linux_windows_apps="$(jq -r '.ci_profiles.linux_windows.apps | join(",")' "$MATRIX_FILE")"
+          linux_windows_include_glob="$(jq -r '.ci_profiles.linux_windows.target_include_glob' "$MATRIX_FILE")"
+          apple_apps="$(jq -r '.ci_profiles.apple.apps | join(",")' "$MATRIX_FILE")"
+          apple_include_glob="$(jq -r '.ci_profiles.apple.target_include_glob' "$MATRIX_FILE")"
+          android_apps="$(jq -r '.ci_profiles.android.apps | join(",")' "$MATRIX_FILE")"
+          android_include_glob="$(jq -r '.ci_profiles.android.target_include_glob' "$MATRIX_FILE")"
+
+          {
+            echo "has_android_target=${has_android_target}"
+            echo "has_apple_target=${has_apple_target}"
+            echo "linux_windows_apps=${linux_windows_apps}"
+            echo "linux_windows_include_glob=${linux_windows_include_glob}"
+            echo "apple_apps=${apple_apps}"
+            echo "apple_include_glob=${apple_include_glob}"
+            echo "android_apps=${android_apps}"
+            echo "android_include_glob=${android_include_glob}"
+          } >> "$GITHUB_OUTPUT"
 
   build-frontend:
     needs: resolve-meta
@@ -142,11 +234,12 @@ jobs:
             workspace/frontends/cli/dist
             workspace/frontends/gui/dist
 
-  build-core:
+  build-linux-windows:
     needs: [resolve-meta, build-frontend]
     runs-on: ubuntu-latest
     env:
-      FILEUNI_ENABLE_DARWIN_CROSS: "1"
+      FILEUNI_APPS: ${{ needs.resolve-meta.outputs.linux_windows_apps }}
+      FILEUNI_TARGET_INCLUDE_GLOB: ${{ needs.resolve-meta.outputs.linux_windows_include_glob }}
       FILEUNI_SKIP_FRONTEND_BUILD: "1"
       FILEUNI_ENABLE_SCCACHE: "1"
       CARGO_TOOLS_ROOT: ${{ github.workspace }}/.cargo-tools
@@ -155,7 +248,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "OUTPUT_DIR=${RUNNER_TEMP}/FileUniRelease" >> "$GITHUB_ENV"
+          echo "OUTPUT_DIR=${RUNNER_TEMP}/FileUniRelease-linux-windows" >> "$GITHUB_ENV"
 
       - name: Checkout workspace source
         uses: actions/checkout@v4
@@ -175,49 +268,14 @@ jobs:
         with:
           version: "0.15.2"
 
-      - name: Setup MSVC environment
-        uses: ilammy/msvc-dev-cmd@v1
-        if: runner.os == 'Windows'
-
       - name: Cache cargo installed tools
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/.cargo-tools
-          key: ${{ runner.os }}-new-zig-cargo-tools-v1-tauri2_10
+          key: ${{ runner.os }}-new-zig-cargo-tools-v2-tauri2_10
           restore-keys: |
-            ${{ runner.os }}-new-zig-cargo-tools-v1-
+            ${{ runner.os }}-new-zig-cargo-tools-v2-
             ${{ runner.os }}-new-zig-cargo-tools-
-
-      - name: Cache cargo-binstall metadata
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/cargo-binstall
-          key: ${{ runner.os }}-new-zig-cargo-binstall-v1
-          restore-keys: |
-            ${{ runner.os }}-new-zig-cargo-binstall-
-
-      - name: Cache Zig build artifacts
-        uses: actions/cache@v4
-        with:
-          path: |
-            workspace/.zig-cache
-            workspace/script-new-zig/.zig-cache
-            workspace/script-new-zig/zig-out
-          key: ${{ runner.os }}-new-zig-script-cache-v2-${{ needs.resolve-meta.outputs.resolved_mode }}-${{ hashFiles('workspace/build.zig', 'workspace/script-new-zig/build_matrix.jsonc', 'workspace/script-new-zig/src/**/*.zig', 'workspace/script-new-zig/scripts/**/*.sh') }}
-          restore-keys: |
-            ${{ runner.os }}-new-zig-script-cache-v2-
-            ${{ runner.os }}-new-zig-script-cache-
-
-      - name: Cache sccache data
-        uses: actions/cache@v4
-        with:
-          path: |
-            workspace/target/.cache/sccache
-            ~/.cache/sccache
-          key: ${{ runner.os }}-new-zig-sccache-v1-${{ hashFiles('workspace/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-new-zig-sccache-v1-
-            ${{ runner.os }}-new-zig-sccache-
 
       - name: Add cargo tools to PATH
         shell: bash
@@ -239,10 +297,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: workspace/target
-          key: ${{ runner.os }}-new-zig-cargo-target-${{ needs.resolve-meta.outputs.resolved_mode }}-${{ hashFiles('workspace/Cargo.lock') }}
+          key: ${{ runner.os }}-new-zig-cargo-target-linux-windows-${{ needs.resolve-meta.outputs.resolved_mode }}-${{ hashFiles('workspace/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-new-zig-cargo-target-${{ needs.resolve-meta.outputs.resolved_mode }}-
-            ${{ runner.os }}-new-zig-cargo-target-
+            ${{ runner.os }}-new-zig-cargo-target-linux-windows-${{ needs.resolve-meta.outputs.resolved_mode }}-
+            ${{ runner.os }}-new-zig-cargo-target-linux-windows-
 
       - name: Download prebuilt frontend dist
         uses: actions/download-artifact@v4
@@ -250,7 +308,7 @@ jobs:
           name: frontend-dist-${{ needs.resolve-meta.outputs.release_tag }}
           path: workspace
 
-      - name: Normalize and verify frontend dist layout
+      - name: Normalize frontend dist layout
         shell: bash
         working-directory: workspace
         run: |
@@ -264,158 +322,243 @@ jobs:
             fi
             for candidate in "$@"; do
               if [ -f "${candidate}/index.html" ]; then
-                echo "recover dist: ${candidate} -> ${expected}"
                 rm -rf "${expected}"
                 mkdir -p "$(dirname "${expected}")"
                 cp -a "${candidate}" "${expected}"
                 return 0
               fi
             done
-            echo "::error title=Frontend dist missing::Expected ${expected}/index.html not found"
+            echo "::error::missing frontend dist: ${expected}/index.html"
             return 1
           }
 
-          ensure_dist "frontends/cli/dist"             "frontends/cli/dist"             "workspace/frontends/cli/dist"             "cli/dist"
-          ensure_dist "frontends/gui/dist"             "frontends/gui/dist"             "workspace/frontends/gui/dist"             "gui/dist"
-
-      - name: Detect prepare necessity
-        id: prepare_check
-        shell: bash
-        run: |
-          set -euo pipefail
-          need_prepare=0
-          root_bin="${CARGO_TOOLS_ROOT}/bin"
-          for tool in cargo-binstall cargo-zigbuild cargo-xwin cargo-tauri sccache; do
-            if [ ! -x "${root_bin}/${tool}" ]; then
-              need_prepare=1
-            fi
-          done
-
-          skip_system_deps="false"
-          skip_fpm="false"
-
-          if command -v pkg-config >/dev/null 2>&1; then
-            if pkg-config --exists gtk+-3.0 webkit2gtk-4.1; then
-              skip_system_deps="true"
-            fi
-          fi
-          if command -v fpm >/dev/null 2>&1; then
-            skip_fpm="true"
-          fi
-
-          if [ "${need_prepare}" -eq 0 ] && [ "${skip_system_deps}" = "true" ] && [ "${skip_fpm}" = "true" ]; then
-            echo "need_prepare=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "need_prepare=true" >> "$GITHUB_OUTPUT"
-          fi
-          echo "skip_system_deps=${skip_system_deps}" >> "$GITHUB_OUTPUT"
-          echo "skip_fpm=${skip_fpm}" >> "$GITHUB_OUTPUT"
+          ensure_dist "frontends/cli/dist" "frontends/cli/dist" "workspace/frontends/cli/dist" "cli/dist"
+          ensure_dist "frontends/gui/dist" "frontends/gui/dist" "workspace/frontends/gui/dist" "gui/dist"
 
       - name: Prepare build dependencies and cross tools
-        if: steps.prepare_check.outputs.need_prepare == 'true'
         shell: bash
         working-directory: workspace
         run: |
           set -euo pipefail
-          zig build release-run -- ci:prepare-tools             --cargo-tools-root "${CARGO_TOOLS_ROOT}"             --tauri-version "~2.10"             --skip-system-deps="${{ steps.prepare_check.outputs.skip_system_deps }}"             --skip-fpm="${{ steps.prepare_check.outputs.skip_fpm }}"
+          zig build release-run -- ci:prepare-tools \
+            --cargo-tools-root "${CARGO_TOOLS_ROOT}" \
+            --tauri-version "~2.10" \
+            --skip-system-deps="false" \
+            --skip-fpm="false"
 
-      - name: Build release artifacts
+      - name: Build release artifacts (linux/windows/bsd)
         shell: bash
         working-directory: workspace
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           rm -rf "$OUTPUT_DIR"
           mkdir -p "$OUTPUT_DIR"
-          sccache --show-stats || true
-          build_log="$(mktemp)"
-          assert_log="$(mktemp)"
-          trap 'rm -f "$build_log" "$assert_log"' EXIT
+          zig build release-run -- release:build-all "${{ needs.resolve-meta.outputs.resolved_mode }}" --output-dir "$OUTPUT_DIR"
+          zig build release-run -- ci:assert-artifacts --output-dir "$OUTPUT_DIR"
 
-          annotate_errors() {
-            awk '
-              {
-                print
-                clean=$0
-                gsub(/\\x1B\\[[0-9;]*[[:alpha:]]/, "", clean)
-                if (clean ~ /\[ERROR\]|build-all failures|target failed|command failed \(|Package .* failed|failed for|error:|fatal error:/) {
-                  print "::error::" clean
-                }
-              }
-            '
-          }
-
-          collect_failure_digest() {
-            awk '
-              {
-                clean=$0
-                gsub(/\\x1B\\[[0-9;]*[[:alpha:]]/, "", clean)
-                if (clean ~ /\[ERROR\]|fatal error:|error: could not compile|failed to run custom build command|unsupported target|failed to find tool|unable to find dynamic system library|command failed \(|Package .* failed/) {
-                  if (!(clean in seen)) {
-                    seen[clean] = 1
-                    print clean
-                    count++
-                    if (count >= 120) exit
-                  }
-                }
-              }
-            ' "$@"
-          }
-
-          set +e
-          zig build release-run -- release:build-all "${{ needs.resolve-meta.outputs.resolved_mode }}" --output-dir "$OUTPUT_DIR" 2>&1 | tee "$build_log" | annotate_errors
-          build_exit=${PIPESTATUS[0]}
-          if [ "$build_exit" -eq 0 ]; then
-            zig build release-run -- ci:assert-artifacts --output-dir "$OUTPUT_DIR" 2>&1 | tee "$assert_log" | annotate_errors
-            assert_exit=${PIPESTATUS[0]}
-          else
-            echo "skip ci:assert-artifacts because build failed"
-            assert_exit=1
-          fi
-          set -e
-
-          if [ "$build_exit" -ne 0 ] || [ "$assert_exit" -ne 0 ]; then
-            echo "::error title=Build failed::release:build-all or ci:assert-artifacts failed"
-            failure_digest="$(collect_failure_digest "$build_log" "$assert_log" | sed '/^[[:space:]]*$/d' || true)"
-            if [ -z "${failure_digest:-}" ]; then
-              failure_digest="No digest lines matched. Check full logs in this step."
-            fi
-            echo "::group::Failure digest"
-            printf '%s\n' "$failure_digest"
-            echo "::endgroup::"
-            while IFS= read -r line; do
-              [ -z "$line" ] && continue
-              echo "::error::$line"
-            done <<< "$failure_digest"
-            sccache --show-stats || true
-            if [ -n "${GITHUB_TOKEN:-}" ]; then
-              curl -fsS -X POST                 -H "Authorization: Bearer ${GITHUB_TOKEN}"                 -H "Accept: application/vnd.github+json"                 "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/cancel" >/dev/null 2>&1 || true
-            fi
-            exit 1
-          fi
-          sccache --show-stats || true
-
-      - name: Upload core artifacts
+      - name: Upload core artifacts (linux/windows)
         uses: actions/upload-artifact@v4
         with:
-          name: release-core-${{ needs.resolve-meta.outputs.release_tag }}
+          name: release-core-linux-windows-${{ needs.resolve-meta.outputs.release_tag }}
           path: ${{ env.OUTPUT_DIR }}/*
+
+  build-apple:
+    if: needs.resolve-meta.outputs.has_apple_target == 'true'
+    needs: [resolve-meta, build-frontend]
+    runs-on: macos-14
+    env:
+      FILEUNI_APPS: ${{ needs.resolve-meta.outputs.apple_apps }}
+      FILEUNI_TARGET_INCLUDE_GLOB: ${{ needs.resolve-meta.outputs.apple_include_glob }}
+      FILEUNI_SKIP_FRONTEND_BUILD: "1"
+      CARGO_TOOLS_ROOT: ${{ github.workspace }}/.cargo-tools
+    steps:
+      - name: Resolve runner output directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "OUTPUT_DIR=${RUNNER_TEMP}/FileUniRelease-apple" >> "$GITHUB_ENV"
+
+      - name: Checkout workspace source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.WORKSPACE_REPO }}
+          ref: ${{ needs.resolve-meta.outputs.resolved_ref }}
+          token: ${{ secrets.FILEUNI_WORKSPACE_PAT }}
+          path: workspace
+          fetch-depth: 0
+          submodules: true
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: "0.15.2"
+
+      - name: Add cargo tools to PATH
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${CARGO_TOOLS_ROOT}/bin"
+          echo "${CARGO_TOOLS_ROOT}/bin" >> "$GITHUB_PATH"
+
+      - name: Download prebuilt frontend dist
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist-${{ needs.resolve-meta.outputs.release_tag }}
+          path: workspace
+
+      - name: Prepare Apple build tools
+        shell: bash
+        working-directory: workspace
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          zig build release-run -- ci:prepare-tools \
+            --cargo-tools-root "${CARGO_TOOLS_ROOT}" \
+            --tauri-version "~2.10" \
+            --skip-system-deps="true" \
+            --skip-fpm="true"
+
+      - name: Build release artifacts (apple)
+        shell: bash
+        working-directory: workspace
+        run: |
+          set -euo pipefail
+          rm -rf "$OUTPUT_DIR"
+          mkdir -p "$OUTPUT_DIR"
+          zig build release-run -- release:build-all "${{ needs.resolve-meta.outputs.resolved_mode }}" --output-dir "$OUTPUT_DIR"
+          zig build release-run -- ci:assert-artifacts --output-dir "$OUTPUT_DIR"
+
+      - name: Upload core artifacts (apple)
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-core-apple-${{ needs.resolve-meta.outputs.release_tag }}
+          path: ${{ env.OUTPUT_DIR }}/*
+
+  build-android:
+    if: needs.resolve-meta.outputs.has_android_target == 'true'
+    needs: [resolve-meta, build-frontend]
+    runs-on: ubuntu-latest
+    env:
+      FILEUNI_APPS: ${{ needs.resolve-meta.outputs.android_apps }}
+      FILEUNI_TARGET_INCLUDE_GLOB: ${{ needs.resolve-meta.outputs.android_include_glob }}
+      FILEUNI_SKIP_FRONTEND_BUILD: "1"
+      CARGO_TOOLS_ROOT: ${{ github.workspace }}/.cargo-tools
+    steps:
+      - name: Resolve runner output directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "OUTPUT_DIR=${RUNNER_TEMP}/FileUniRelease-android" >> "$GITHUB_ENV"
+
+      - name: Checkout workspace source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.WORKSPACE_REPO }}
+          ref: ${{ needs.resolve-meta.outputs.resolved_ref }}
+          token: ${{ secrets.FILEUNI_WORKSPACE_PAT }}
+          path: workspace
+          fetch-depth: 0
+          submodules: true
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: "0.15.2"
+
+      - name: Setup Java for Android
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Prepare Android SDK and targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${HOME}/.android"
+          touch "${HOME}/.android/repositories.cfg"
+          if [ -n "${ANDROID_SDK_ROOT:-}" ]; then
+            sdk_root="${ANDROID_SDK_ROOT}"
+          elif [ -n "${ANDROID_HOME:-}" ]; then
+            sdk_root="${ANDROID_HOME}"
+          else
+            echo "::error::ANDROID_SDK_ROOT/ANDROID_HOME is not set"
+            exit 1
+          fi
+          export ANDROID_SDK_ROOT="${sdk_root}"
+          export ANDROID_HOME="${sdk_root}"
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager --install "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+          rustup target add aarch64-linux-android
+
+      - name: Add cargo tools to PATH
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${CARGO_TOOLS_ROOT}/bin"
+          echo "${CARGO_TOOLS_ROOT}/bin" >> "$GITHUB_PATH"
+
+      - name: Download prebuilt frontend dist
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist-${{ needs.resolve-meta.outputs.release_tag }}
+          path: workspace
+
+      - name: Prepare Android build tools
+        shell: bash
+        working-directory: workspace
+        run: |
+          set -euo pipefail
+          zig build release-run -- ci:prepare-tools \
+            --cargo-tools-root "${CARGO_TOOLS_ROOT}" \
+            --tauri-version "~2.10" \
+            --skip-system-deps="true" \
+            --skip-fpm="true"
+
+      - name: Build release artifacts (android)
+        shell: bash
+        working-directory: workspace
+        run: |
+          set -euo pipefail
+          rm -rf "$OUTPUT_DIR"
+          mkdir -p "$OUTPUT_DIR"
+          zig build release-run -- release:build-all "${{ needs.resolve-meta.outputs.resolved_mode }}" --output-dir "$OUTPUT_DIR"
+          zig build release-run -- ci:assert-artifacts --output-dir "$OUTPUT_DIR"
+
+      - name: Upload core artifacts (android)
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-core-android-${{ needs.resolve-meta.outputs.release_tag }}
+          path: ${{ env.OUTPUT_DIR }}/*
+
   publish:
     if: ${{ always() && !cancelled() }}
-    needs: [resolve-meta, build-core]
+    needs: [resolve-meta, build-linux-windows, build-apple, build-android]
     runs-on: ubuntu-latest
     steps:
       - name: Validate upstream job results
         shell: bash
         run: |
           set -euo pipefail
-          if [ "${{ needs.build-core.result }}" != "success" ]; then
-            echo "::error::build-core failed"
+          if [ "${{ needs.build-linux-windows.result }}" != "success" ]; then
+            echo "::error::build-linux-windows failed"
             exit 1
           fi
-          if [ "${{ needs.build-core.result }}" = "failure" ]; then
-            echo "::error::build-core failed unexpectedly"
+          if [ "${{ needs.resolve-meta.outputs.has_apple_target }}" = "true" ] && [ "${{ needs.build-apple.result }}" != "success" ]; then
+            echo "::error::build-apple failed"
+            exit 1
+          fi
+          if [ "${{ needs.resolve-meta.outputs.has_android_target }}" = "true" ] && [ "${{ needs.build-android.result }}" != "success" ]; then
+            echo "::error::build-android failed"
             exit 1
           fi
 
@@ -434,22 +577,22 @@ jobs:
         with:
           version: "0.15.2"
 
-      - name: Download core build artifacts
+      - name: Download all release artifacts
         uses: actions/download-artifact@v4
         with:
           pattern: release-core-*-${{ needs.resolve-meta.outputs.release_tag }}
           path: /tmp/FileUniRelease
           merge-multiple: true
 
-      - name: List merged artifacts
+      - name: Ensure merged artifacts exist
         shell: bash
         run: |
           set -euo pipefail
-          ls -lah /tmp/FileUniRelease || true
+          mkdir -p /tmp/FileUniRelease
           count="$(find /tmp/FileUniRelease -maxdepth 1 -type f | wc -l | tr -d ' ')"
           echo "artifact-count=${count}"
           if [ "$count" -eq 0 ]; then
-            echo "::error title=No artifacts::No release artifacts found in /tmp/FileUniRelease"
+            echo "::error::No release artifacts found in /tmp/FileUniRelease"
             exit 1
           fi
 
@@ -476,11 +619,9 @@ jobs:
         run: |
           set -euo pipefail
           if [ ! -d "workspace" ]; then
-            echo "workspace checkout is unavailable; skip summary generation"
             exit 0
           fi
           if ! command -v zig >/dev/null 2>&1; then
-            echo "zig is unavailable; skip summary generation"
             exit 0
           fi
           cd workspace
