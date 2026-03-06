@@ -68,11 +68,6 @@ jobs:
           fetch-depth: 0
           submodules: false
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.25.x"
-
       - name: Setup Zig
         uses: mlugg/setup-zig@v2
         with:
@@ -120,7 +115,7 @@ jobs:
         working-directory: workspace
         run: |
           set -euo pipefail
-          MATRIX_FILE="script-zig-next/build_matrix.jsonc"
+          MATRIX_FILE="script-new-zig/build_matrix.jsonc"
           MODE="${{ steps.meta.outputs.resolved_mode }}"
 
           if [ ! -f "$MATRIX_FILE" ]; then
@@ -234,11 +229,6 @@ jobs:
           fetch-depth: 0
           submodules: true
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.25.x"
-
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
@@ -273,13 +263,11 @@ jobs:
         with:
           path: |
             workspace/.zig-cache
-            workspace/script-zig/.zig-cache
-            workspace/script-zig/zig-out
-            workspace/script-zig-next/.zig-cache
-            workspace/script-zig-next/zig-out
-          key: ${{ runner.os }}-new-zig-script-cache-v1-${{ hashFiles('workspace/build.zig', 'workspace/script-zig-next/build_matrix.jsonc', 'workspace/script-zig-next/src/**/*.zig', 'workspace/script-zig-next/scripts/**/*.sh', 'workspace/script/build_matrix.jsonc', 'workspace/script-zig/build_matrix.jsonc') }}
+            workspace/script-new-zig/.zig-cache
+            workspace/script-new-zig/zig-out
+          key: ${{ runner.os }}-new-zig-script-cache-v2-${{ hashFiles('workspace/build.zig', 'workspace/script-new-zig/build_matrix.jsonc', 'workspace/script-new-zig/src/**/*.zig', 'workspace/script-new-zig/scripts/**/*.sh') }}
           restore-keys: |
-            ${{ runner.os }}-new-zig-script-cache-v1-
+            ${{ runner.os }}-new-zig-script-cache-v2-
             ${{ runner.os }}-new-zig-script-cache-
 
       - name: Cache sccache data
@@ -782,11 +770,6 @@ jobs:
           path: workspace
           fetch-depth: 0
           submodules: false
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.25.x"
 
       - name: Setup Zig
         uses: mlugg/setup-zig@v2

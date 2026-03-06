@@ -1,33 +1,34 @@
-# FileUni Two-Repo Release Flow (Community Side)
+# FileUni Release Flow (Community Side)
 
 ## Purpose
 This workflow file documents the public build-and-release pipeline in `FileUni-Community`.
 The pipeline is dispatched from `FileUni-WorkSpace` or manually triggered.
 
 ## Workflow
-- Workflow: `community-build-release.yml`
+- Workflow: `NewBuildReleaesByZig.yml`
 - Trigger: `workflow_dispatch`
 - Required secret: `FILEUNI_WORKSPACE_PAT`
 
 ## Current Design
-Most logic previously implemented with shell blocks has been migrated to Go commands in `workspace/script/tools.go`.
-YAML now focuses on orchestration and cache declarations.
+The release pipeline is based on:
+- `workspace/build.zig`
+- `workspace/script-new-zig/`
+- this workflow file
+
+Legacy paths are explicitly out of scope for this flow:
+- `workspace/script/` (Go backend)
+- `workspace/script-zig/`
+- `workspace/script-zig-next/`
 
 ## Step Responsibilities
 1. Bootstrap checkout of `fileuni/FileUni-WorkSpace`.
-2. Setup Go and run:
-   - `ci:resolve-community-build` (input normalization, prerelease detection, source ref resolution)
-   - `ci:checkout-workspace-ref` (checkout final resolved ref + submodules)
-3. Setup Bun/Rust/Zig and restore caches.
-4. Run:
-   - `ci:prepare-tools` (system deps + cargo helper tools, preferring prebuilt binary path)
-5. Build artifacts:
-   - `release:build-all`
-   - `ci:assert-artifacts`
-6. Publish release:
-   - `ci:publish-community-release` (create/update release, reconcile prerelease, upload assets)
-7. Write summary:
-   - `ci:write-release-summary`
+2. Setup Rust/Zig (no Go runtime dependency in this flow).
+3. Resolve release metadata via `zig build release-run -- ci:resolve-community-build`.
+4. Build frontend once and reuse dist artifacts.
+5. Prepare tools via `zig build release-run -- ci:prepare-tools`.
+6. Build artifacts via `zig build release-run -- release:build-all` and validate via `ci:assert-artifacts`.
+7. Publish release via `ci:publish-community-release`.
+8. Write summary via `ci:write-release-summary`.
 
 ## Caching Strategy
 - `~/.cargo-tools` for installed tool binaries.
@@ -43,6 +44,6 @@ For `tauri-cli`, `cargo-zigbuild`, and `cargo-xwin`:
 
 This reduces environment preparation time on cache hits and avoids unnecessary source builds.
 
-## Stability Notes
-- `minimal` mode now uses `x86_64-unknown-linux-gnu` by default (CLI + GUI).
-- Host-native targets are built with native cargo/tauri commands (no zig runner), which avoids common OpenSSL cross-linking failures seen in GNU/musl mixed pipelines.
+## Policy Notes
+- New CI and release verification must use the `script-new-zig` command surface only.
+- If a document or script still references `go run script/tools.go` or `script-zig*`, treat it as legacy and do not use it for release jobs.
