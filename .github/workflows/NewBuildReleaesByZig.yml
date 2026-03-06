@@ -497,6 +497,8 @@ jobs:
     if: needs.resolve-meta.outputs.android_enabled == 'true'
     needs: [resolve-meta, build-frontend]
     runs-on: ubuntu-latest
+    env:
+      CARGO_TOOLS_ROOT: ${{ runner.temp }}/cargo-tools
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.resolve-meta.outputs.android_matrix) }}
@@ -538,18 +540,68 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p "${CARGO_TOOLS_ROOT}/bin"
+          echo "${CARGO_TOOLS_ROOT}/bin" >> "$GITHUB_PATH"
+
+          mkdir -p "${HOME}/.android"
+          touch "${HOME}/.android/repositories.cfg"
+
+          if [ -n "${ANDROID_SDK_ROOT:-}" ]; then
+            sdk_root="${ANDROID_SDK_ROOT}"
+          elif [ -n "${ANDROID_HOME:-}" ]; then
+            sdk_root="${ANDROID_HOME}"
+          else
+            echo "::error::ANDROID_SDK_ROOT/ANDROID_HOME is not set"
+            exit 1
+          fi
+
+          export ANDROID_SDK_ROOT="${sdk_root}"
+          export ANDROID_HOME="${sdk_root}"
+          if [ -d "${sdk_root}/cmdline-tools/latest/bin" ]; then
+            echo "${sdk_root}/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+            export PATH="${sdk_root}/cmdline-tools/latest/bin:${PATH}"
+          fi
+          if [ -d "${sdk_root}/platform-tools" ]; then
+            echo "${sdk_root}/platform-tools" >> "$GITHUB_PATH"
+            export PATH="${sdk_root}/platform-tools:${PATH}"
+          fi
+
           command -v sdkmanager
-          command -v adb
           rustup target add "${{ matrix.target }}"
-          yes | sdkmanager --licenses >/dev/null
-          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+          set +o pipefail
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          set -o pipefail
+          sdkmanager --install "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+          command -v adb
 
       - name: Install Android build tools
         shell: bash
         run: |
           set -euo pipefail
-          cargo install --locked cargo-zigbuild
-          cargo install --locked cargo-tauri --version '^2.10'
+          mkdir -p "${CARGO_TOOLS_ROOT}/bin"
+          echo "${CARGO_TOOLS_ROOT}/bin" >> "$GITHUB_PATH"
+          export PATH="${CARGO_TOOLS_ROOT}/bin:${PATH}"
+
+          retry() {
+            local n=1
+            local max=3
+            local delay=5
+            until "$@"; do
+              if [ "$n" -ge "$max" ]; then
+                return 1
+              fi
+              n=$((n + 1))
+              sleep "$delay"
+            done
+          }
+
+          if ! command -v cargo-binstall >/dev/null 2>&1; then
+            retry cargo install --locked cargo-binstall
+          fi
+          retry cargo-binstall --root "${CARGO_TOOLS_ROOT}" --no-confirm cargo-zigbuild
+          retry cargo-binstall --root "${CARGO_TOOLS_ROOT}" --no-confirm "tauri-cli@^2.10"
+          command -v cargo-zigbuild
+          command -v cargo-tauri
 
       - name: Download prebuilt frontend dist
         uses: actions/download-artifact@v4
@@ -588,6 +640,8 @@ jobs:
     if: needs.resolve-meta.outputs.apple_bundle_enabled == 'true'
     needs: [resolve-meta, build-frontend]
     runs-on: macos-14
+    env:
+      CARGO_TOOLS_ROOT: ${{ runner.temp }}/cargo-tools
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.resolve-meta.outputs.apple_bundle_matrix) }}
@@ -620,10 +674,30 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          brew update
-          brew install upx
-          cargo install --locked cargo-zigbuild
-          cargo install --locked cargo-tauri --version '^2.10'
+          mkdir -p "${CARGO_TOOLS_ROOT}/bin"
+          echo "${CARGO_TOOLS_ROOT}/bin" >> "$GITHUB_PATH"
+          export PATH="${CARGO_TOOLS_ROOT}/bin:${PATH}"
+
+          retry() {
+            local n=1
+            local max=3
+            local delay=5
+            until "$@"; do
+              if [ "$n" -ge "$max" ]; then
+                return 1
+              fi
+              n=$((n + 1))
+              sleep "$delay"
+            done
+          }
+
+          if ! command -v cargo-binstall >/dev/null 2>&1; then
+            retry cargo install --locked cargo-binstall
+          fi
+          retry cargo-binstall --root "${CARGO_TOOLS_ROOT}" --no-confirm cargo-zigbuild
+          retry cargo-binstall --root "${CARGO_TOOLS_ROOT}" --no-confirm "tauri-cli@^2.10"
+          command -v cargo-zigbuild
+          command -v cargo-tauri
 
       - name: Audit Apple toolchain
         shell: bash
@@ -774,9 +848,17 @@ jobs:
       - name: Add workflow summary
         if: always()
         shell: bash
-        working-directory: workspace
         run: |
           set -euo pipefail
+          if [ ! -d "workspace" ]; then
+            echo "workspace checkout is unavailable; skip summary generation"
+            exit 0
+          fi
+          if ! command -v zig >/dev/null 2>&1; then
+            echo "zig is unavailable; skip summary generation"
+            exit 0
+          fi
+          cd workspace
           zig build release-run -- ci:write-release-summary \
             --release-tag "${{ needs.resolve-meta.outputs.release_tag }}" \
             --workspace-ref "${{ needs.resolve-meta.outputs.resolved_ref }}" \
