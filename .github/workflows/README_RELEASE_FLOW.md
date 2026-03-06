@@ -15,10 +15,7 @@ The release pipeline is based on:
 - `workspace/script-new-zig/`
 - this workflow file
 
-Legacy paths are explicitly out of scope for this flow:
-- `workspace/script/` (Go backend)
-- `workspace/script-zig/`
-- `workspace/script-zig-next/`
+Legacy script backends have been removed from the workspace.
 
 ## Step Responsibilities
 1. Bootstrap checkout of `fileuni/FileUni-WorkSpace`.
@@ -46,4 +43,3 @@ This reduces environment preparation time on cache hits and avoids unnecessary s
 
 ## Policy Notes
 - New CI and release verification must use the `script-new-zig` command surface only.
-- If a document or script still references `go run script/tools.go` or `script-zig*`, treat it as legacy and do not use it for release jobs.
