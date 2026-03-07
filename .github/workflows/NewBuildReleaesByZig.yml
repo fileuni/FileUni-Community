@@ -187,9 +187,92 @@ jobs:
             workspace/frontends/cli/dist
             workspace/frontends/gui/dist
 
-  build-cli-dist:
+  smoke-cli-dist:
     if: needs.resolve-meta.outputs.has_dist == 'true'
     needs: [resolve-meta, build-frontends]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout workspace source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.WORKSPACE_REPO }}
+          ref: ${{ needs.resolve-meta.outputs.resolved_ref }}
+          token: ${{ secrets.FILEUNI_WORKSPACE_PAT }}
+          path: workspace
+          fetch-depth: 0
+          submodules: true
+
+      - name: Download prebuilt frontend dist
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist-${{ needs.resolve-meta.outputs.release_tag }}
+          path: workspace
+
+      - name: Normalize frontend dist layout
+        shell: bash
+        working-directory: workspace
+        run: |
+          set -euo pipefail
+
+          ensure_dist() {
+            expected="$1"
+            shift
+            if [ -f "${expected}/index.html" ]; then
+              return 0
+            fi
+            for candidate in "$@"; do
+              if [ -f "${candidate}/index.html" ]; then
+                rm -rf "${expected}"
+                mkdir -p "$(dirname "${expected}")"
+                cp -a "${candidate}" "${expected}"
+                return 0
+              fi
+            done
+            echo "::error::missing frontend dist: ${expected}/index.html"
+            return 1
+          }
+
+          ensure_dist "frontends/cli/dist" "frontends/cli/dist" "workspace/frontends/cli/dist" "cli/dist"
+          ensure_dist "frontends/gui/dist" "frontends/gui/dist" "workspace/frontends/gui/dist" "gui/dist"
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: "0.15.2"
+
+      - name: Install cargo-dist
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-dist@0.28.0
+
+      - name: Verify cargo-dist binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v dist
+          dist --version
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: workspace
+          key: cli-dist-smoke-x86_64-unknown-linux-gnu
+
+      - name: Smoke build CLI artifacts via cargo-dist
+        shell: bash
+        working-directory: workspace
+        run: |
+          set -euo pipefail
+          dist build --target "x86_64-unknown-linux-gnu" --artifacts=local
+
+  build-cli-dist:
+    if: needs.resolve-meta.outputs.has_dist == 'true' && needs.smoke-cli-dist.result == 'success'
+    needs: [resolve-meta, build-frontends, smoke-cli-dist]
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.resolve-meta.outputs.dist_matrix) }}
@@ -309,8 +392,8 @@ jobs:
           path: workspace/target/distrib/*
 
   build-tauri-desktop:
-    if: needs.resolve-meta.outputs.has_tauri_desktop == 'true'
-    needs: [resolve-meta, build-frontends]
+    if: needs.resolve-meta.outputs.has_tauri_desktop == 'true' && (needs.resolve-meta.outputs.has_dist != 'true' || needs.smoke-cli-dist.result == 'success')
+    needs: [resolve-meta, build-frontends, smoke-cli-dist]
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.resolve-meta.outputs.tauri_desktop_matrix) }}
@@ -417,8 +500,8 @@ jobs:
           path: ${{ runner.temp }}/tauri-desktop-${{ matrix.target }}/*
 
   build-tauri-android:
-    if: needs.resolve-meta.outputs.has_android == 'true'
-    needs: [resolve-meta, build-frontends]
+    if: needs.resolve-meta.outputs.has_android == 'true' && (needs.resolve-meta.outputs.has_dist != 'true' || needs.smoke-cli-dist.result == 'success')
+    needs: [resolve-meta, build-frontends, smoke-cli-dist]
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.resolve-meta.outputs.tauri_android_matrix) }}
@@ -548,8 +631,8 @@ jobs:
           path: ${{ runner.temp }}/tauri-android/*
 
   build-tauri-ios:
-    if: needs.resolve-meta.outputs.has_ios == 'true'
-    needs: [resolve-meta, build-frontends]
+    if: needs.resolve-meta.outputs.has_ios == 'true' && (needs.resolve-meta.outputs.has_dist != 'true' || needs.smoke-cli-dist.result == 'success')
+    needs: [resolve-meta, build-frontends, smoke-cli-dist]
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.resolve-meta.outputs.tauri_ios_matrix) }}
@@ -658,6 +741,7 @@ jobs:
     if: ${{ always() && !cancelled() }}
     needs:
       - resolve-meta
+      - smoke-cli-dist
       - build-cli-dist
       - build-tauri-desktop
       - build-tauri-android
@@ -669,6 +753,10 @@ jobs:
         run: |
           set -euo pipefail
 
+          if [ "${{ needs.resolve-meta.outputs.has_dist }}" = "true" ] && [ "${{ needs.smoke-cli-dist.result }}" != "success" ]; then
+            echo "::error::smoke-cli-dist failed"
+            exit 1
+          fi
           if [ "${{ needs.resolve-meta.outputs.has_dist }}" = "true" ] && [ "${{ needs.build-cli-dist.result }}" != "success" ]; then
             echo "::error::build-cli-dist failed"
             exit 1
@@ -755,9 +843,15 @@ jobs:
       - name: Write workflow summary
         if: always()
         shell: bash
-        working-directory: workspace
         run: |
           set -euo pipefail
+          if [ ! -d "workspace" ]; then
+            exit 0
+          fi
+          if ! command -v zig >/dev/null 2>&1; then
+            exit 0
+          fi
+          cd workspace
           zig build release-run -- ci:write-release-summary \
             --release-tag "${{ needs.resolve-meta.outputs.release_tag }}" \
             --workspace-ref "${{ needs.resolve-meta.outputs.resolved_ref }}" \
