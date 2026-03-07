@@ -304,7 +304,6 @@ jobs:
       matrix:
         include:
           - { os: freebsd, release: "14.2", target: x86_64-unknown-freebsd }
-          - { os: netbsd,  release: "10.1", target: x86_64-unknown-netbsd  }
     runs-on: ubuntu-latest
     steps:
       - name: Checkout workspace
@@ -323,7 +322,6 @@ jobs:
           path: workspace/frontends/cli/dist
 
       - name: Build on FreeBSD
-        if: matrix.os == 'freebsd'
         uses: vmactions/freebsd-vm@v1
         with:
           release: ${{ matrix.release }}
@@ -332,21 +330,6 @@ jobs:
           mem: 8192
           prepare: |
             pkg install -y rust curl
-          run: |
-            cd workspace
-            cargo build --release --package fileuni
-            ls -la target/release/fileuni
-
-      - name: Build on NetBSD
-        if: matrix.os == 'netbsd'
-        uses: vmactions/netbsd-vm@v1
-        with:
-          release: ${{ matrix.release }}
-          usesh: true
-          copyback: true
-          mem: 8192
-          prepare: |
-            /usr/sbin/pkg_add rust curl
           run: |
             cd workspace
             cargo build --release --package fileuni
