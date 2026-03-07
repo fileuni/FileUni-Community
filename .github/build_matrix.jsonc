@@ -2,7 +2,7 @@
   // FileUni Build Matrix Configuration
   // Controls which platforms are built for each mode and product.
   //
-  // mode: "minimal" = fast dev/test builds, "full" = all platforms
+  // mode: "minimal" = fast dev/test builds, "full" = all configured platforms
   // build_method: "cargo-dist" | "cross" | "vmactions"
   // nfpm_arch: set for Linux targets that should produce deb/rpm/apk/archlinux/ipk packages (empty string = skip)
   // upx: whether UPX compression is supported for this target
@@ -22,20 +22,25 @@
       { "target": "armv7-unknown-linux-musleabihf", "nfpm_arch": "armhf",   "upx": true,  "mode": ["full"] },
       { "target": "arm-unknown-linux-gnueabi",      "nfpm_arch": "armel",   "upx": false, "mode": ["full"] },
       { "target": "riscv64gc-unknown-linux-gnu",    "nfpm_arch": "riscv64", "upx": false, "mode": ["full"] },
-      { "target": "powerpc64le-unknown-linux-gnu",  "nfpm_arch": "ppc64le", "upx": false, "mode": ["full"] },
-      { "target": "aarch64-linux-android",          "nfpm_arch": "",        "upx": false, "mode": ["full"] },
-      { "target": "armv7-linux-androideabi",        "nfpm_arch": "",        "upx": false, "mode": ["full"] },
-      { "target": "x86_64-linux-android",           "nfpm_arch": "",        "upx": false, "mode": ["full"] }
+      { "target": "powerpc64le-unknown-linux-gnu",  "nfpm_arch": "ppc64le", "upx": false, "mode": ["full"] }
+    ],
+    "android": [
+      { "target": "aarch64-linux-android",   "ndk_abi": "arm64-v8a",    "mode": ["full"] },
+      { "target": "armv7-linux-androideabi", "ndk_abi": "armeabi-v7a",  "mode": ["full"] },
+      { "target": "x86_64-linux-android",    "ndk_abi": "x86_64",       "mode": ["full"] }
     ],
     "vmactions": [
       { "os": "freebsd", "release": "14.2", "target": "x86_64-unknown-freebsd", "mode": ["full"] }
     ]
   },
 
-  // GUI targets (Tauri) — not yet implemented, placeholder for future use
+  // GUI targets (Tauri)
   "gui": {
-    "cargo-dist": [],
-    "cross": [],
-    "vmactions": []
+    "tauri": [
+      { "runner": "windows-latest", "target": "x86_64-pc-windows-msvc",       "bundles": "nsis",     "artifact_ext": ".exe",      "mode": ["full"] },
+      { "runner": "ubuntu-latest",  "target": "x86_64-unknown-linux-gnu",      "bundles": "appimage", "artifact_ext": ".AppImage", "mode": ["minimal", "full"] },
+      { "runner": "ubuntu-24.04-arm", "target": "aarch64-unknown-linux-gnu",   "bundles": "appimage", "artifact_ext": ".AppImage", "mode": ["full"] },
+      { "runner": "macos-15",       "target": "aarch64-apple-darwin",          "bundles": "pkg",      "artifact_ext": ".pkg",      "mode": ["full"] }
+    ]
   }
 }

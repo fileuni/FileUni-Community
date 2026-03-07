@@ -8,13 +8,22 @@ on:
         required: false
         default: "main"
       build_mode:
-        description: "Build mode: full (all platforms) or minimal (x64 linux only)"
+        description: "Build mode: full (all configured platforms) or minimal (CLI musl + GUI x64 AppImage)"
         type: choice
         options:
           - full
           - minimal
         required: false
         default: "full"
+      build_target:
+        description: "Build target set: cli / gui / cli+gui"
+        type: choice
+        options:
+          - cli+gui
+          - cli
+          - gui
+        required: false
+        default: "cli+gui"
       prerelease:
         description: "Mark as pre-release"
         type: boolean
@@ -47,12 +56,18 @@ jobs:
       pkg_version: ${{ steps.meta.outputs.pkg_version }}
       cli_cargo_dist: ${{ steps.matrix.outputs.cli_cargo_dist }}
       cli_cross: ${{ steps.matrix.outputs.cli_cross }}
+      cli_android: ${{ steps.matrix.outputs.cli_android }}
       cli_vmactions: ${{ steps.matrix.outputs.cli_vmactions }}
       cli_nfpm: ${{ steps.matrix.outputs.cli_nfpm }}
+      gui_tauri: ${{ steps.matrix.outputs.gui_tauri }}
+      has_cli: ${{ steps.matrix.outputs.has_cli }}
+      has_gui: ${{ steps.matrix.outputs.has_gui }}
       has_cargo_dist: ${{ steps.matrix.outputs.has_cargo_dist }}
       has_cross: ${{ steps.matrix.outputs.has_cross }}
+      has_android: ${{ steps.matrix.outputs.has_android }}
       has_vmactions: ${{ steps.matrix.outputs.has_vmactions }}
       has_nfpm: ${{ steps.matrix.outputs.has_nfpm }}
+      has_gui_tauri: ${{ steps.matrix.outputs.has_gui_tauri }}
     steps:
       - name: Resolve workspace ref
         id: resolve-ref
@@ -100,6 +115,8 @@ jobs:
         run: |
           mode="${{ github.event.inputs.build_mode }}"
           mode="${mode:-full}"
+          target_set="${{ github.event.inputs.build_target }}"
+          target_set="${target_set:-cli+gui}"
 
           # Strip JSONC comments and parse
           sed 's|//.*||' community/.github/build_matrix.jsonc | jq -c '.' > /tmp/matrix.json
@@ -107,31 +124,58 @@ jobs:
           # Filter targets by mode for each build method
           cli_cargo_dist="$(jq -c --arg m "$mode" '[.cli["cargo-dist"][] | select(.mode | index($m))]' /tmp/matrix.json)"
           cli_cross="$(jq -c --arg m "$mode" '[.cli.cross[] | select(.mode | index($m))]' /tmp/matrix.json)"
+          cli_android="$(jq -c --arg m "$mode" '[.cli.android[] | select(.mode | index($m))]' /tmp/matrix.json)"
           cli_vmactions="$(jq -c --arg m "$mode" '[.cli.vmactions[] | select(.mode | index($m))]' /tmp/matrix.json)"
+          gui_tauri="$(jq -c --arg m "$mode" '[.gui.tauri[] | select(.mode | index($m))]' /tmp/matrix.json)"
+
+          if [ "$target_set" = "cli" ]; then
+            gui_tauri='[]'
+          elif [ "$target_set" = "gui" ]; then
+            cli_cargo_dist='[]'
+            cli_cross='[]'
+            cli_android='[]'
+            cli_vmactions='[]'
+          fi
 
           # nFPM targets: all Linux targets with non-empty nfpm_arch from both cargo-dist and cross
-          cli_nfpm="$(jq -c --arg m "$mode" '
+          cli_nfpm="$(jq -c '
             [
-              (.cli["cargo-dist"][] | select(.mode | index($m)) | select(.nfpm_arch != "") | {target, nfpm_arch, artifact: ("cli-" + .target)}),
-              (.cli.cross[]        | select(.mode | index($m)) | select(.nfpm_arch != "") | {target, nfpm_arch, artifact: ("cli-" + .target)})
+              (.[] | select(.nfpm_arch != "") | {target, nfpm_arch, artifact: ("cli-" + .target)})
             ]
-          ' /tmp/matrix.json)"
+          ' <(jq -c -n --argjson a "$cli_cargo_dist" --argjson b "$cli_cross" '$a + $b'))"
+
+          has_cli=false
+          if [ "$target_set" = "cli" ] || [ "$target_set" = "cli+gui" ]; then
+            has_cli=true
+          fi
+
+          has_gui=false
+          if [ "$target_set" = "gui" ] || [ "$target_set" = "cli+gui" ]; then
+            has_gui=true
+          fi
 
           echo "cli_cargo_dist=${cli_cargo_dist}" >> "$GITHUB_OUTPUT"
           echo "cli_cross=${cli_cross}" >> "$GITHUB_OUTPUT"
+          echo "cli_android=${cli_android}" >> "$GITHUB_OUTPUT"
           echo "cli_vmactions=${cli_vmactions}" >> "$GITHUB_OUTPUT"
           echo "cli_nfpm=${cli_nfpm}" >> "$GITHUB_OUTPUT"
+          echo "gui_tauri=${gui_tauri}" >> "$GITHUB_OUTPUT"
+          echo "has_cli=${has_cli}" >> "$GITHUB_OUTPUT"
+          echo "has_gui=${has_gui}" >> "$GITHUB_OUTPUT"
 
           # has_* flags for conditional job execution
           echo "has_cargo_dist=$([ "$(echo "$cli_cargo_dist" | jq 'length')" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
           echo "has_cross=$([ "$(echo "$cli_cross" | jq 'length')" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "has_android=$([ "$(echo "$cli_android" | jq 'length')" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
           echo "has_vmactions=$([ "$(echo "$cli_vmactions" | jq 'length')" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
           echo "has_nfpm=$([ "$(echo "$cli_nfpm" | jq 'length')" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "has_gui_tauri=$([ "$(echo "$gui_tauri" | jq 'length')" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
-          echo "::notice::mode=${mode} cargo_dist=$(echo "$cli_cargo_dist" | jq 'length') cross=$(echo "$cli_cross" | jq 'length') vmactions=$(echo "$cli_vmactions" | jq 'length') nfpm=$(echo "$cli_nfpm" | jq 'length')"
+          echo "::notice::mode=${mode} target=${target_set} cli_cargo_dist=$(echo "$cli_cargo_dist" | jq 'length') cli_cross=$(echo "$cli_cross" | jq 'length') cli_android=$(echo "$cli_android" | jq 'length') cli_vmactions=$(echo "$cli_vmactions" | jq 'length') cli_nfpm=$(echo "$cli_nfpm" | jq 'length') gui_tauri=$(echo "$gui_tauri" | jq 'length')"
 
-  build-frontends:
+  build-frontend-cli:
     needs: resolve-matrix
+    if: needs.resolve-matrix.outputs.has_cli == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout workspace
@@ -157,24 +201,65 @@ jobs:
           key: bun-${{ hashFiles('workspace/frontends/bun.lock') }}
           restore-keys: bun-
 
-      - name: Build frontends
+      - name: Build CLI frontend
         working-directory: workspace/frontends
         run: |
           bun install
           bun run --cwd cli build
           test -f cli/dist/index.html
 
-      - name: Upload frontend dist
+      - name: Upload CLI frontend dist
         uses: actions/upload-artifact@v4
         with:
-          name: frontend-dist
+          name: frontend-cli-dist
           path: workspace/frontends/cli/dist
+
+  build-frontend-gui:
+    needs: resolve-matrix
+    if: needs.resolve-matrix.outputs.has_gui == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout workspace
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.WORKSPACE_REPO }}
+          ref: ${{ needs.resolve-matrix.outputs.workspace_ref }}
+          token: ${{ secrets.FILEUNI_WORKSPACE_PAT }}
+          path: workspace
+          submodules: true
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Cache Bun
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.bun/install/cache
+            workspace/frontends/node_modules
+            workspace/frontends/gui/node_modules
+            workspace/frontends/shared/node_modules
+          key: bun-${{ hashFiles('workspace/frontends/bun.lock') }}
+          restore-keys: bun-
+
+      - name: Build GUI frontend
+        working-directory: workspace/frontends
+        run: |
+          bun install
+          bun run --cwd gui build
+          test -f gui/dist/index.html
+
+      - name: Upload GUI frontend dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-gui-dist
+          path: workspace/frontends/gui/dist
 
   # ============================================================
   # Tier 1/2: cargo-dist native builds
   # ============================================================
   build-cli:
-    needs: [resolve-matrix, build-frontends]
+    needs: [resolve-matrix, build-frontend-cli]
     if: needs.resolve-matrix.outputs.has_cargo_dist == 'true'
     strategy:
       fail-fast: false
@@ -196,7 +281,7 @@ jobs:
       - name: Download frontend dist
         uses: actions/download-artifact@v4
         with:
-          name: frontend-dist
+          name: frontend-cli-dist
           path: workspace/frontends/cli/dist
 
       - name: Setup Rust
@@ -244,10 +329,10 @@ jobs:
           path: workspace/target/distrib/*
 
   # ============================================================
-  # Cross-compiled builds (Linux exotic + Android)
+  # Cross-compiled builds (Linux exotic)
   # ============================================================
   build-cli-cross:
-    needs: [resolve-matrix, build-frontends]
+    needs: [resolve-matrix, build-frontend-cli]
     if: needs.resolve-matrix.outputs.has_cross == 'true'
     strategy:
       fail-fast: false
@@ -267,7 +352,7 @@ jobs:
       - name: Download frontend dist
         uses: actions/download-artifact@v4
         with:
-          name: frontend-dist
+          name: frontend-cli-dist
           path: workspace/frontends/cli/dist
 
       - name: Setup Rust
@@ -337,10 +422,139 @@ jobs:
           path: dist/*
 
   # ============================================================
+  # Android builds (cargo-ndk)
+  # ============================================================
+  build-cli-android:
+    needs: [resolve-matrix, build-frontend-cli]
+    if: needs.resolve-matrix.outputs.has_android == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.resolve-matrix.outputs.cli_android) }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout workspace
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.WORKSPACE_REPO }}
+          ref: ${{ needs.resolve-matrix.outputs.workspace_ref }}
+          token: ${{ secrets.FILEUNI_WORKSPACE_PAT }}
+          path: workspace
+          submodules: true
+
+      - name: Download frontend dist
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-cli-dist
+          path: workspace/frontends/cli/dist
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Setup Android SDK/NDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Build Android binary
+        working-directory: workspace
+        run: cargo ndk -t ${{ matrix.ndk_abi }} build --release --package fileuni
+
+      - name: Package binary
+        run: |
+          target="${{ matrix.target }}"
+          bin="$(find workspace/target -path "*/release/fileuni" | grep "${target}" | head -1 || true)"
+          if [ -z "${bin}" ]; then
+            echo "::error::Android binary not found for ${target}"
+            find workspace/target -maxdepth 5 -type f | sed -n '1,200p'
+            exit 1
+          fi
+          mkdir -p dist
+          tar -cJf "dist/fileuni-${target}.tar.xz" -C "$(dirname "${bin}")" "$(basename "${bin}")"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-${{ matrix.target }}
+          path: dist/*
+
+  # ============================================================
+  # GUI builds via Tauri (unsigned)
+  # ============================================================
+  build-gui:
+    needs: [resolve-matrix, build-frontend-gui]
+    if: needs.resolve-matrix.outputs.has_gui_tauri == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.resolve-matrix.outputs.gui_tauri) }}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout workspace
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.WORKSPACE_REPO }}
+          ref: ${{ needs.resolve-matrix.outputs.workspace_ref }}
+          token: ${{ secrets.FILEUNI_WORKSPACE_PAT }}
+          path: workspace
+          submodules: true
+
+      - name: Download GUI frontend dist
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-gui-dist
+          path: workspace/frontends/gui/dist
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Linux dependencies for Tauri
+        if: startsWith(matrix.runner, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Install cargo-tauri CLI
+        working-directory: workspace/apps/gui
+        run: cargo install tauri-cli --version '^2.0' --locked
+
+      - name: Build GUI bundles (unsigned)
+        working-directory: workspace/apps/gui
+        run: |
+          jq '.bundle.active = true' tauri.conf.json > tauri.ci.conf.json
+          cargo tauri build --target "${{ matrix.target }}" --bundles "${{ matrix.bundles }}" --config tauri.ci.conf.json
+
+      - name: Package GUI artifact
+        run: |
+          mkdir -p dist
+          ext="${{ matrix.artifact_ext }}"
+          file="$(find workspace/apps/gui/target/${{ matrix.target }}/release/bundle -type f -name "*${ext}" | head -1)"
+          if [ -z "${file}" ]; then
+            echo "::error::No GUI artifact found with extension ${ext}"
+            exit 1
+          fi
+          cp "${file}" "dist/"
+
+      - name: Upload GUI artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: gui-${{ matrix.target }}
+          path: dist/*
+
+  # ============================================================
   # BSD builds via vmactions (FreeBSD native VM)
   # ============================================================
   build-cli-bsd:
-    needs: [resolve-matrix, build-frontends]
+    needs: [resolve-matrix, build-frontend-cli]
     if: needs.resolve-matrix.outputs.has_vmactions == 'true'
     strategy:
       fail-fast: false
@@ -360,7 +574,7 @@ jobs:
       - name: Download frontend dist
         uses: actions/download-artifact@v4
         with:
-          name: frontend-dist
+          name: frontend-cli-dist
           path: workspace/frontends/cli/dist
 
       - name: Build on FreeBSD
@@ -466,14 +680,14 @@ jobs:
           path: packages/*
 
   publish:
-    needs: [resolve-matrix, build-cli, build-cli-cross, build-cli-bsd, package-linux]
+    needs: [resolve-matrix, build-cli, build-cli-cross, build-cli-android, build-cli-bsd, build-gui, package-linux]
     if: ${{ always() && !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: "{cli-*,packages-*}"
+          pattern: "{cli-*,gui-*,packages-*}"
           path: /tmp/release
           merge-multiple: true
 
