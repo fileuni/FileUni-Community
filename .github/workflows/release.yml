@@ -622,7 +622,11 @@ jobs:
           fi
           upx_bin="$(dirname "${bin}")/fileuni-upx${ext}"
           cp "${bin}" "${upx_bin}"
-          "${upx_cmd}" --best --lzma "${upx_bin}"
+          upx_opts=(--best --lzma)
+          if [[ "${target}" == *apple-darwin* ]]; then
+            upx_opts+=(--force-macos)
+          fi
+          "${upx_cmd}" "${upx_opts[@]}" "${upx_bin}"
 
           mkdir -p dist-upx
           if [[ "${target}" == *windows* ]]; then
@@ -747,7 +751,7 @@ jobs:
           fi
 
       - name: Create UPX-compressed copy
-        if: github.event.inputs.enable_upx != 'false'
+        if: github.event.inputs.enable_upx != 'false' && !contains(matrix.target, 'riscv64')
         run: |
           target="${{ matrix.target }}"
           arch_raw="${target%%-*}"
@@ -802,7 +806,7 @@ jobs:
           tar -cJf "dist-upx/${base}.upx.tar.xz" -C "$(dirname "${bin}")" "fileuni-upx"
 
       - name: Upload UPX artifacts
-        if: github.event.inputs.enable_upx != 'false'
+        if: github.event.inputs.enable_upx != 'false' && !contains(matrix.target, 'riscv64')
         uses: actions/upload-artifact@v4
         with:
           name: cli-${{ matrix.target }}-upx
@@ -954,11 +958,6 @@ jobs:
         with:
           name: frontend-cli-dist
           path: workspace/frontends/cli/dist
-
-      - name: Setup Xcode
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: latest-stable
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -1197,6 +1196,11 @@ jobs:
         with:
           name: frontend-cli-dist
           path: workspace/frontends/cli/dist
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
