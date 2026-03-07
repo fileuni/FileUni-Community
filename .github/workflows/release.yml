@@ -102,86 +102,89 @@ jobs:
           path: workspace/frontends/cli/dist
 
   # ============================================================
-  # Tier 1: cargo-dist builds (verified, commented out for testing)
-  # Uncomment for production releases.
+  # Tier 1/2: cargo-dist native builds
   # ============================================================
-  # build-cli:
-  #   needs: build-frontends
-  #   strategy:
-  #     fail-fast: true
-  #     matrix:
-  #       include:
-  #         - { runner: ubuntu-latest,  target: x86_64-unknown-linux-gnu }
-  #         - { runner: ubuntu-latest,  target: x86_64-unknown-linux-musl }
-  #         - { runner: ubuntu-latest,  target: aarch64-unknown-linux-gnu }
-  #         - { runner: windows-latest, target: x86_64-pc-windows-msvc }
-  #         - { runner: macos-15,       target: x86_64-apple-darwin }
-  #         - { runner: macos-15,       target: aarch64-apple-darwin }
-  #   runs-on: ${{ matrix.runner }}
-  #   steps:
-  #     - name: Checkout workspace
-  #       uses: actions/checkout@v4
-  #       with:
-  #         repository: ${{ env.WORKSPACE_REPO }}
-  #         ref: ${{ needs.build-frontends.outputs.workspace_ref }}
-  #         token: ${{ secrets.FILEUNI_WORKSPACE_PAT }}
-  #         path: workspace
-  #         submodules: true
-  #         fetch-depth: 0
-  #         fetch-tags: true
-  #
-  #     - name: Download frontend dist
-  #       uses: actions/download-artifact@v4
-  #       with:
-  #         name: frontend-dist
-  #         path: workspace/frontends/cli/dist
-  #
-  #     - name: Setup Rust
-  #       uses: dtolnay/rust-toolchain@stable
-  #       with:
-  #         targets: ${{ matrix.target }}
-  #
-  #     - name: Install cargo-dist
-  #       uses: taiki-e/install-action@v2
-  #       with:
-  #         tool: cargo-dist@${{ env.CARGO_DIST_VERSION }}
-  #
-  #     - name: Install musl-tools
-  #       if: matrix.target == 'x86_64-unknown-linux-musl'
-  #       run: |
-  #         sudo apt-get update
-  #         sudo apt-get install -y musl-tools
-  #
-  #     - name: Install cross-compilation tools
-  #       if: matrix.target == 'aarch64-unknown-linux-gnu'
-  #       uses: taiki-e/install-action@v2
-  #       with:
-  #         tool: cargo-zigbuild
-  #
-  #     - name: Setup Zig (for cross-compilation)
-  #       if: matrix.target == 'aarch64-unknown-linux-gnu'
-  #       uses: mlugg/setup-zig@v2
-  #       with:
-  #         version: "0.13.0"
-  #
-  #     - name: Cache Rust
-  #       uses: Swatinem/rust-cache@v2
-  #       with:
-  #         workspaces: workspace
-  #         key: ${{ matrix.target }}
-  #
-  #     - name: Build via cargo-dist
-  #       working-directory: workspace
-  #       run: dist build --tag="${{ needs.build-frontends.outputs.dist_tag }}" --target "${{ matrix.target }}" --artifacts=local
-  #
-  #     - name: Upload artifacts
-  #       uses: actions/upload-artifact@v4
-  #       with:
-  #         name: cli-${{ matrix.target }}
-  #         path: workspace/target/distrib/*
+  build-cli:
+    needs: build-frontends
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # --- Linux ---
+          - { runner: ubuntu-latest,  target: x86_64-unknown-linux-gnu }
+          - { runner: ubuntu-latest,  target: x86_64-unknown-linux-musl }
+          - { runner: ubuntu-latest,  target: aarch64-unknown-linux-gnu }
+          # --- Windows ---
+          - { runner: windows-latest, target: x86_64-pc-windows-msvc }
+          - { runner: windows-latest, target: i686-pc-windows-msvc }
+          # --- macOS ---
+          - { runner: macos-15,       target: x86_64-apple-darwin }
+          - { runner: macos-15,       target: aarch64-apple-darwin }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout workspace
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.WORKSPACE_REPO }}
+          ref: ${{ needs.build-frontends.outputs.workspace_ref }}
+          token: ${{ secrets.FILEUNI_WORKSPACE_PAT }}
+          path: workspace
+          submodules: true
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Download frontend dist
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: workspace/frontends/cli/dist
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cargo-dist
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-dist@${{ env.CARGO_DIST_VERSION }}
+
+      - name: Install musl-tools
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
+      - name: Install cross-compilation tools
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-zigbuild
+
+      - name: Setup Zig (for cross-compilation)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        uses: mlugg/setup-zig@v2
+        with:
+          version: "0.13.0"
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: workspace
+          key: ${{ matrix.target }}
+
+      - name: Build via cargo-dist
+        working-directory: workspace
+        run: dist build --tag="${{ needs.build-frontends.outputs.dist_tag }}" --target "${{ matrix.target }}" --artifacts=local
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-${{ matrix.target }}
+          path: workspace/target/distrib/*
 
   # ============================================================
-  # Tier 2: cross-compiled builds (experimental)
+  # Cross-compiled builds (Linux exotic + Android)
   # ============================================================
   build-cli-cross:
     needs: build-frontends
@@ -190,15 +193,17 @@ jobs:
       matrix:
         include:
           # --- Linux ARM ---
-          - { target: aarch64-unknown-linux-musl,    nfpm_arch: arm64,   upx: true,  tier: 2 }
-          - { target: armv7-unknown-linux-musleabihf, nfpm_arch: armhf,   upx: true,  tier: 2 }
+          - { target: aarch64-unknown-linux-musl,    nfpm_arch: arm64,   upx: true  }
+          - { target: armv7-unknown-linux-musleabihf, nfpm_arch: armhf,   upx: true  }
+          - { target: arm-unknown-linux-gnueabi,     nfpm_arch: armel,   upx: false }
           # --- Linux RISC-V ---
-          - { target: riscv64gc-unknown-linux-gnu,   nfpm_arch: riscv64, upx: false, tier: 2 }
+          - { target: riscv64gc-unknown-linux-gnu,   nfpm_arch: riscv64, upx: false }
           # --- Linux PowerPC ---
-          - { target: powerpc64le-unknown-linux-gnu, nfpm_arch: ppc64le, upx: false, tier: 2 }
-          # --- Linux MIPS (Tier 3, requires nightly + build-std via Cross.toml) ---
-          - { target: mipsel-unknown-linux-musl,       nfpm_arch: mipsel,   upx: true,  tier: 3 }
-          - { target: mips64el-unknown-linux-muslabi64, nfpm_arch: mips64el, upx: false, tier: 3 }
+          - { target: powerpc64le-unknown-linux-gnu, nfpm_arch: ppc64le, upx: false }
+          # --- Android ---
+          - { target: aarch64-linux-android,         nfpm_arch: "",      upx: false }
+          - { target: armv7-linux-androideabi,       nfpm_arch: "",      upx: false }
+          - { target: x86_64-linux-android,          nfpm_arch: "",      upx: false }
     runs-on: ubuntu-latest
     steps:
       - name: Checkout workspace
@@ -216,17 +221,10 @@ jobs:
           name: frontend-dist
           path: workspace/frontends/cli/dist
 
-      - name: Setup Rust (stable)
-        if: matrix.tier == 2
+      - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-
-      - name: Setup Rust (nightly for Tier 3 build-std)
-        if: matrix.tier == 3
-        uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: rust-src
 
       - name: Install cross
         uses: taiki-e/install-action@v2
@@ -241,12 +239,7 @@ jobs:
 
       - name: Build via cross
         working-directory: workspace
-        run: |
-          if [ "${{ matrix.tier }}" = "3" ]; then
-            cross +nightly build --release --package fileuni --target "${{ matrix.target }}"
-          else
-            cross build --release --package fileuni --target "${{ matrix.target }}"
-          fi
+        run: cross build --release --package fileuni --target "${{ matrix.target }}"
 
       - name: Package binary
         run: |
@@ -357,25 +350,22 @@ jobs:
   # Runs after all Linux builds complete, packages each arch.
   # ============================================================
   package-linux:
-    needs: [build-frontends, build-cli-cross]
-    # needs: [build-frontends, build-cli, build-cli-cross]  # uncomment when build-cli is active
+    needs: [build-frontends, build-cli, build-cli-cross]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          # map each Linux target to nFPM arch + artifact name
-          # --- from build-cli (commented out for now) ---
-          # - { target: x86_64-unknown-linux-gnu,   nfpm_arch: amd64,   artifact: cli-x86_64-unknown-linux-gnu }
-          # - { target: x86_64-unknown-linux-musl,  nfpm_arch: amd64,   artifact: cli-x86_64-unknown-linux-musl }
-          # - { target: aarch64-unknown-linux-gnu,  nfpm_arch: arm64,   artifact: cli-aarch64-unknown-linux-gnu }
+          # --- from build-cli ---
+          - { target: x86_64-unknown-linux-gnu,      nfpm_arch: amd64,   artifact: cli-x86_64-unknown-linux-gnu }
+          - { target: x86_64-unknown-linux-musl,     nfpm_arch: amd64,   artifact: cli-x86_64-unknown-linux-musl }
+          - { target: aarch64-unknown-linux-gnu,     nfpm_arch: arm64,   artifact: cli-aarch64-unknown-linux-gnu }
           # --- from build-cli-cross ---
           - { target: aarch64-unknown-linux-musl,    nfpm_arch: arm64,   artifact: cli-aarch64-unknown-linux-musl }
           - { target: armv7-unknown-linux-musleabihf, nfpm_arch: armhf,   artifact: cli-armv7-unknown-linux-musleabihf }
+          - { target: arm-unknown-linux-gnueabi,     nfpm_arch: armel,   artifact: cli-arm-unknown-linux-gnueabi }
           - { target: riscv64gc-unknown-linux-gnu,   nfpm_arch: riscv64, artifact: cli-riscv64gc-unknown-linux-gnu }
           - { target: powerpc64le-unknown-linux-gnu, nfpm_arch: ppc64le, artifact: cli-powerpc64le-unknown-linux-gnu }
-          - { target: mipsel-unknown-linux-musl,       nfpm_arch: mipsel,   artifact: cli-mipsel-unknown-linux-musl }
-          - { target: mips64el-unknown-linux-muslabi64, nfpm_arch: mips64el, artifact: cli-mips64el-unknown-linux-muslabi64 }
     steps:
       - name: Download binary artifact
         uses: actions/download-artifact@v4
@@ -436,8 +426,7 @@ jobs:
           path: packages/*
 
   publish:
-    needs: [build-frontends, build-cli-cross, build-cli-bsd, package-linux]
-    # needs: [build-frontends, build-cli, build-cli-cross, package-linux]  # uncomment when build-cli is active
+    needs: [build-frontends, build-cli, build-cli-cross, build-cli-bsd, package-linux]
     if: ${{ always() && !cancelled() }}
     runs-on: ubuntu-latest
     steps:
