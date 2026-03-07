@@ -12,6 +12,11 @@ on:
         type: boolean
         required: false
         default: true
+      enable_upx:
+        description: "Create UPX-compressed copies of binaries"
+        type: boolean
+        required: false
+        default: true
 
 permissions:
   contents: write
@@ -185,18 +190,18 @@ jobs:
       matrix:
         include:
           # --- Linux ARM ---
-          - { target: aarch64-unknown-linux-musl,    nfpm_arch: arm64  }
-          - { target: armv7-unknown-linux-musleabihf, nfpm_arch: armhf  }
+          - { target: aarch64-unknown-linux-musl,    nfpm_arch: arm64,   upx: true  }
+          - { target: armv7-unknown-linux-musleabihf, nfpm_arch: armhf,   upx: true  }
           # --- Linux RISC-V ---
-          - { target: riscv64gc-unknown-linux-gnu,   nfpm_arch: riscv64 }
+          - { target: riscv64gc-unknown-linux-gnu,   nfpm_arch: riscv64, upx: false }
           # --- Linux PowerPC ---
-          - { target: powerpc64le-unknown-linux-gnu, nfpm_arch: ppc64le }
+          - { target: powerpc64le-unknown-linux-gnu, nfpm_arch: ppc64le, upx: false }
           # --- Linux MIPS (OpenWrt routers) ---
-          - { target: mipsel-unknown-linux-musl,     nfpm_arch: mipsel }
-          - { target: mips64el-unknown-linux-muslabi64, nfpm_arch: mips64el }
+          - { target: mipsel-unknown-linux-musl,     nfpm_arch: mipsel,  upx: true  }
+          - { target: mips64el-unknown-linux-muslabi64, nfpm_arch: mips64el, upx: false }
           # --- BSD ---
-          - { target: x86_64-unknown-freebsd,        nfpm_arch: ""     }
-          - { target: x86_64-unknown-netbsd,         nfpm_arch: ""     }
+          - { target: x86_64-unknown-freebsd,        nfpm_arch: "",      upx: false }
+          - { target: x86_64-unknown-netbsd,         nfpm_arch: "",      upx: false }
     runs-on: ubuntu-latest
     steps:
       - name: Checkout workspace
@@ -247,6 +252,32 @@ jobs:
           else
             tar -cJf "dist/fileuni-${target}.tar.xz" -C "$(dirname "${bin}")" "$(basename "${bin}")"
           fi
+
+      - name: Create UPX-compressed copy
+        if: matrix.upx && github.event.inputs.enable_upx != 'false'
+        run: |
+          target="${{ matrix.target }}"
+          bin="workspace/target/${target}/release/fileuni"
+          if [ ! -f "${bin}" ]; then
+            echo "::warning::Binary not found for UPX, skipping"
+            exit 0
+          fi
+
+          sudo apt-get update -qq && sudo apt-get install -y -qq upx-ucl > /dev/null 2>&1
+
+          cp "${bin}" "${bin}-upx"
+          upx --best --lzma "${bin}-upx" || { echo "::warning::UPX compression failed for ${target}"; rm -f "${bin}-upx"; exit 0; }
+
+          mkdir -p dist-upx
+          tar -cJf "dist-upx/fileuni-${target}-upx.tar.xz" -C "$(dirname "${bin}")" "fileuni-upx"
+
+      - name: Upload UPX artifacts
+        if: matrix.upx && github.event.inputs.enable_upx != 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-${{ matrix.target }}-upx
+          path: dist-upx/*
+          if-no-files-found: ignore
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
