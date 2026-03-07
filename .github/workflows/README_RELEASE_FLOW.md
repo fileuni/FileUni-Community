@@ -45,4 +45,4 @@ Legacy custom packaging scripts are not supported.
 - Android ready if `apps/gui/src-tauri/gen/android` or `apps/gui/gen/android` exists.
 - iOS ready if `apps/gui/src-tauri/gen/apple|ios` or `apps/gui/gen/apple|ios` exists.
 
-If not ready, mobile jobs are disabled instead of failing late.
+If not ready, mobile jobs run an initialization step (`cargo tauri android/ios init --ci`) before build.

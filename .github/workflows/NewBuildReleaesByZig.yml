@@ -253,6 +253,13 @@ jobs:
         with:
           tool: cargo-dist@0.28.0
 
+      - name: Verify cargo-dist binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v dist
+          dist --version
+
       - name: Install Linux native deps for musl targets
         if: startsWith(matrix.target, 'x86_64-unknown-linux-musl')
         shell: bash
@@ -281,7 +288,7 @@ jobs:
         working-directory: workspace
         run: |
           set -euo pipefail
-          cargo dist build --target "${{ matrix.target }}" --artifacts=local
+          dist build --target "${{ matrix.target }}" --artifacts=local
 
       - name: Assert CLI dist output exists
         shell: bash
@@ -502,6 +509,17 @@ jobs:
           echo "ANDROID_NDK_HOME=${sdk_root}/ndk/27.0.12077973" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_ROOT=${sdk_root}/ndk/27.0.12077973" >> "$GITHUB_ENV"
 
+      - name: Initialize Android scaffold if missing
+        shell: bash
+        working-directory: workspace/apps/gui
+        run: |
+          set -euo pipefail
+          if [ -d "gen/android" ] || [ -d "src-tauri/gen/android" ]; then
+            echo "Android scaffold already exists."
+          else
+            cargo tauri android init --ci
+          fi
+
       - name: Build Android GUI via tauri-action
         uses: tauri-apps/tauri-action@v0
         with:
@@ -592,6 +610,22 @@ jobs:
         uses: taiki-e/install-action@v2
         with:
           tool: tauri-cli@2.10.0
+
+      - name: Initialize iOS scaffold if missing
+        shell: bash
+        working-directory: workspace/apps/gui
+        run: |
+          set -euo pipefail
+          if [ -d "gen/apple" ] || [ -d "gen/ios" ] || [ -d "src-tauri/gen/apple" ] || [ -d "src-tauri/gen/ios" ]; then
+            echo "iOS scaffold already exists."
+            exit 0
+          fi
+          if cargo tauri ios init --help >/dev/null 2>&1; then
+            cargo tauri ios init --ci
+          else
+            echo "::error::cargo tauri ios command is unavailable on this runner."
+            exit 1
+          fi
 
       - name: Build iOS GUI via tauri-action (unsigned)
         uses: tauri-apps/tauri-action@v0
