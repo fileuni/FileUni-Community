@@ -322,11 +322,40 @@ jobs:
         working-directory: workspace
         run: dist build --tag="${{ needs.resolve-matrix.outputs.dist_tag }}" --target "${{ matrix.target }}" --artifacts=local
 
+      - name: Create fallback artifact when distrib is empty
+        shell: bash
+        run: |
+          shopt -s nullglob
+          files=(workspace/target/distrib/*)
+          if [ ${#files[@]} -gt 0 ]; then
+            exit 0
+          fi
+
+          target="${{ matrix.target }}"
+          bin="workspace/target/${target}/release/fileuni"
+          if [ ! -f "${bin}" ]; then
+            bin="workspace/target/${target}/release/fileuni.exe"
+          fi
+          if [ ! -f "${bin}" ]; then
+            echo "::error::No binary found for ${target}"
+            find workspace/target -maxdepth 6 -type f | sed -n '1,200p'
+            exit 1
+          fi
+
+          mkdir -p dist-fallback
+          if [[ "${target}" == *windows* ]]; then
+            zip "dist-fallback/fileuni-${target}.zip" "${bin}"
+          else
+            tar -cJf "dist-fallback/fileuni-${target}.tar.xz" -C "$(dirname "${bin}")" "$(basename "${bin}")"
+          fi
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: cli-${{ matrix.target }}
-          path: workspace/target/distrib/*
+          path: |
+            workspace/target/distrib/*
+            dist-fallback/*
 
   # ============================================================
   # Cross-compiled builds (Linux exotic)
@@ -390,7 +419,7 @@ jobs:
           fi
 
       - name: Create UPX-compressed copy
-        if: matrix.upx && github.event.inputs.enable_upx != 'false'
+        if: github.event.inputs.enable_upx != 'false'
         run: |
           target="${{ matrix.target }}"
           bin="workspace/target/${target}/release/fileuni"
@@ -408,7 +437,7 @@ jobs:
           tar -cJf "dist-upx/fileuni-${target}-upx.tar.xz" -C "$(dirname "${bin}")" "fileuni-upx"
 
       - name: Upload UPX artifacts
-        if: matrix.upx && github.event.inputs.enable_upx != 'false'
+        if: github.event.inputs.enable_upx != 'false'
         uses: actions/upload-artifact@v4
         with:
           name: cli-${{ matrix.target }}-upx
@@ -529,11 +558,20 @@ jobs:
 
       - name: Build GUI bundles (unsigned)
         working-directory: workspace/apps/gui
+        shell: bash
         run: |
-          jq '.bundle.active = true' tauri.conf.json > tauri.ci.conf.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path('tauri.conf.json')
+          cfg = json.loads(p.read_text())
+          cfg.setdefault('bundle', {})['active'] = True
+          Path('tauri.ci.conf.json').write_text(json.dumps(cfg))
+          PY
           cargo tauri build --target "${{ matrix.target }}" --bundles "${{ matrix.bundles }}" --config tauri.ci.conf.json
 
       - name: Package GUI artifact
+        shell: bash
         run: |
           mkdir -p dist
           ext="${{ matrix.artifact_ext }}"
@@ -636,15 +674,28 @@ jobs:
           else
             cp artifact/fileuni binary/ 2>/dev/null || true
           fi
-          chmod +x binary/fileuni || true
+
+          real_bin="$(find binary -type f -name fileuni | head -1)"
+          if [ -z "${real_bin}" ]; then
+            echo "::error::Extracted package does not contain fileuni binary"
+            find binary -maxdepth 5 -type f | sed -n '1,200p'
+            exit 1
+          fi
+          cp "${real_bin}" binary/fileuni
+          chmod +x binary/fileuni
           ls -la binary/
 
       - name: Install nFPM
         uses: secondlife/setup-nfpm@v1
+        with:
+          version: latest
 
       - name: Create nfpm config
+        env:
+          NFPM_ARCH: ${{ matrix.nfpm_arch }}
+          VERSION: ${{ needs.resolve-matrix.outputs.pkg_version }}
         run: |
-          cat > nfpm.yaml <<'NFPM'
+          cat > nfpm.yaml <<NFPM
           name: fileuni
           arch: ${NFPM_ARCH}
           version: ${VERSION}
