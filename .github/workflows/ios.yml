@@ -116,6 +116,11 @@ jobs:
           set -euo pipefail
           xcode_dev_dir="$(xcode-select -p)"
           default_toolchain="${xcode_dev_dir}/Toolchains/XcodeDefault.xctoolchain"
+          ci_xcconfig="/tmp/fileuni-ios-ci.xcconfig"
+          cat > "${ci_xcconfig}" <<'XCCONFIG'
+          TOOLCHAINS = com.apple.dt.toolchain.XcodeDefault
+          LIBRARY_SEARCH_PATHS = $(inherited) $(DT_TOOLCHAIN_DIR)/usr/lib/swift/$(PLATFORM_NAME) $(DT_TOOLCHAIN_DIR)/usr/lib/swift-5.0/$(PLATFORM_NAME)
+          XCCONFIG
 
           # Force generated Xcode project to unsigned mode.
           project_pbxproj="gen/apple/fileuni-gui.xcodeproj/project.pbxproj"
@@ -133,6 +138,7 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM="" \
+            XCODE_XCCONFIG_FILE="${ci_xcconfig}" \
             TOOLCHAINS="com.apple.dt.toolchain.XcodeDefault" \
             TOOLCHAIN_DIR="${default_toolchain}" \
             cargo tauri ios build --ci --target aarch64 --config tauri.ios.conf.json --no-sign | tee /tmp/xcodebuild-ios.log
@@ -145,6 +151,7 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM="" \
+            XCODE_XCCONFIG_FILE="${ci_xcconfig}" \
             TOOLCHAINS="com.apple.dt.toolchain.XcodeDefault" \
             TOOLCHAIN_DIR="${default_toolchain}" \
             cargo tauri ios build --ci --target aarch64 --config tauri.ios.conf.json | tee /tmp/xcodebuild-ios.log
