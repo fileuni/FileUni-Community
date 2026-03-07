@@ -437,12 +437,7 @@ jobs:
                 echo "::error::Failed to download UPX binary"
                 exit 1
               fi
-              python3 - <<'PY'
-              import zipfile
-              import os
-              tmpdir = os.environ.get('RUNNER_TEMP', '/tmp')
-              zipfile.ZipFile(f'{tmpdir}/upx.zip').extractall(f'{tmpdir}/upx')
-              PY
+              python3 -c "import os,zipfile; t=os.environ.get('RUNNER_TEMP','/tmp'); zipfile.ZipFile(f'{t}/upx.zip').extractall(f'{t}/upx')"
               upx_cmd="$(find "${tmpdir}/upx" -type f -iname 'upx.exe' | head -1)"
               if [ -z "${upx_cmd}" ]; then
                 echo "::error::UPX executable not found"
@@ -800,13 +795,7 @@ jobs:
             exit 1
           fi
 
-          if ! python3 - <<'PY'
-          import zipfile
-          import os
-          tmpdir = os.environ.get('RUNNER_TEMP', '/tmp')
-          zipfile.ZipFile(f'{tmpdir}/upx.zip').extractall(f'{tmpdir}/upx')
-          PY
-          then
+          if ! python3 -c "import os,zipfile; t=os.environ.get('RUNNER_TEMP','/tmp'); zipfile.ZipFile(f'{t}/upx.zip').extractall(f'{t}/upx')"; then
             echo "::error::Failed to extract UPX archive"
             exit 1
           fi
