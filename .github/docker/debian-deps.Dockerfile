@@ -5,9 +5,7 @@ FROM debian:bookworm-slim
 ARG TARGETARCH
 ARG TARGETVARIANT
 
-COPY binaries/ /tmp/fileuni-binaries/
-
-RUN set -eux; \
+RUN --mount=type=bind,source=binaries,target=/tmp/fileuni-binaries,ro set -eux; \
     apt-get update; \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       ca-certificates \
@@ -28,7 +26,6 @@ RUN set -eux; \
       arm/v7) src="/tmp/fileuni-binaries/armv7/fileuni" ;; \
       *) echo "Unsupported Docker target: ${TARGETARCH}${TARGETVARIANT:+/${TARGETVARIANT}}" >&2; exit 1 ;; \
     esac; \
-    install -Dm0755 "${src}" /usr/local/bin/fileuni; \
-    rm -rf /tmp/fileuni-binaries
+    install -Dm0755 "${src}" /usr/local/bin/fileuni
 
 ENTRYPOINT ["/usr/local/bin/fileuni"]
