@@ -5,9 +5,7 @@ FROM alpine:3.21
 ARG TARGETARCH
 ARG TARGETVARIANT
 
-COPY binaries/ /tmp/fileuni-binaries/
-
-RUN set -eux; \
+RUN --mount=type=bind,source=binaries,target=/tmp/fileuni-binaries,ro set -eux; \
     case "${TARGETARCH}${TARGETVARIANT:+/${TARGETVARIANT}}" in \
       amd64) src="/tmp/fileuni-binaries/amd64/fileuni" ;; \
       386) src="/tmp/fileuni-binaries/386/fileuni" ;; \
@@ -15,7 +13,6 @@ RUN set -eux; \
       arm/v7) src="/tmp/fileuni-binaries/armv7/fileuni" ;; \
       *) echo "Unsupported Docker target: ${TARGETARCH}${TARGETVARIANT:+/${TARGETVARIANT}}" >&2; exit 1 ;; \
     esac; \
-    install -Dm0755 "${src}" /usr/local/bin/fileuni; \
-    rm -rf /tmp/fileuni-binaries
+    install -Dm0755 "${src}" /usr/local/bin/fileuni
 
 ENTRYPOINT ["/usr/local/bin/fileuni"]
