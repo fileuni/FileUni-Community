@@ -26,6 +26,23 @@ sudo debootstrap \
   "${rootfs_dir}" \
   http://deb.debian.org/debian
 
+sudo chroot "${rootfs_dir}" /bin/bash -lc "
+  set -euo pipefail
+  apt-get update
+  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    ffmpeg \
+    imagemagick \
+    iproute2 \
+    iputils-ping \
+    libvips-tools \
+    net-tools \
+    p7zip-full \
+    tzdata
+  rm -rf /var/lib/apt/lists/*
+"
+
 sudo install -d -m0755 \
   "${rootfs_dir}/usr/local/bin" \
   "${rootfs_dir}/etc/fileuni" \
