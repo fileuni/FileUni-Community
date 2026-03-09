@@ -17,6 +17,8 @@
       { "runner": "macos-15",       "target": "aarch64-apple-darwin",          "nfpm_arch": "",        "mode": ["full"] }
     ],
     "cross": [
+      { "target": "i686-unknown-linux-gnu",          "nfpm_arch": "386",     "mode": ["full"] },
+      { "target": "i686-unknown-linux-musl",         "nfpm_arch": "386",     "mode": ["full"] },
       { "target": "aarch64-unknown-linux-musl",    "nfpm_arch": "arm64",   "mode": ["full"] },
       { "target": "armv7-unknown-linux-musleabihf", "nfpm_arch": "armhf",   "mode": ["full"] },
       { "target": "arm-unknown-linux-gnueabi",      "nfpm_arch": "armel",   "mode": ["full"] },

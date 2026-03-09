@@ -1500,8 +1500,12 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x .github/scripts/prepare-container-binaries.sh
-          .github/scripts/prepare-container-binaries.sh /tmp/docker-artifacts /tmp/docker-context/binaries
-          find /tmp/docker-context/binaries -maxdepth 2 -type f | sort
+          .github/scripts/prepare-container-binaries.sh /tmp/docker-artifacts /tmp/docker-context/binaries plain
+          find /tmp/docker-context -maxdepth 3 -type f | sort
+          if [ "${{ github.event.inputs.enable_upx }}" != "false" ]; then
+            .github/scripts/prepare-container-binaries.sh /tmp/docker-artifacts /tmp/docker-context-upx/binaries upx
+            find /tmp/docker-context-upx -maxdepth 3 -type f | sort
+          fi
 
       - name: Resolve Docker tags
         id: docker-tags
@@ -1520,16 +1524,21 @@ jobs:
           release_tag="$(sanitize_tag "${RELEASE_TAG}")"
 
           alpine_tags=$'fileuni/fileuni:'"${version_tag}"$'-alpine\nfileuni/fileuni:'"${release_tag}"$'-alpine'
+          alpine_upx_tags=$'fileuni/fileuni:'"${version_tag}"$'-alpine-upx\nfileuni/fileuni:'"${release_tag}"$'-alpine-upx'
           debian_tags=$'fileuni/fileuni:'"${version_tag}"$'-debian\nfileuni/fileuni:'"${release_tag}"$'-debian'
 
           if [ "${PRERELEASE}" != "true" ]; then
             alpine_tags+=$'\nfileuni/fileuni:alpine'
+            alpine_upx_tags+=$'\nfileuni/fileuni:alpine-upx'
             debian_tags+=$'\nfileuni/fileuni:debian'
           fi
 
           {
             echo "alpine<<EOF"
             printf '%s\n' "${alpine_tags}"
+            echo "EOF"
+            echo "alpine_upx<<EOF"
+            printf '%s\n' "${alpine_upx_tags}"
             echo "EOF"
             echo "debian<<EOF"
             printf '%s\n' "${debian_tags}"
@@ -1553,16 +1562,26 @@ jobs:
         with:
           context: /tmp/docker-context
           file: .github/docker/alpine.Dockerfile
-          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          platforms: linux/amd64,linux/386,linux/arm64,linux/arm/v7
           push: true
           tags: ${{ steps.docker-tags.outputs.alpine }}
+
+      - name: Build and push Alpine UPX image
+        if: github.event.inputs.enable_upx != 'false'
+        uses: docker/build-push-action@v6
+        with:
+          context: /tmp/docker-context-upx
+          file: .github/docker/alpine.Dockerfile
+          platforms: linux/amd64,linux/386,linux/arm64,linux/arm/v7
+          push: true
+          tags: ${{ steps.docker-tags.outputs.alpine_upx }}
 
       - name: Build and push Debian deps image
         uses: docker/build-push-action@v6
         with:
           context: /tmp/docker-context
           file: .github/docker/debian-deps.Dockerfile
-          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          platforms: linux/amd64,linux/386,linux/arm64,linux/arm/v7
           push: true
           tags: ${{ steps.docker-tags.outputs.debian }}
 
