@@ -1643,9 +1643,22 @@ jobs:
 
       - name: Publish npm package
         shell: bash
+        env:
+          PKG_VERSION: ${{ needs.resolve-matrix.outputs.pkg_version }}
         run: |
           set -euo pipefail
-          npm publish /tmp/npm-root/fileuni --access public --provenance
+          npm_tag="latest"
+          if [[ "${PKG_VERSION}" == *-* ]]; then
+            prerelease="${PKG_VERSION#*-}"
+            prerelease="${prerelease%%.*}"
+            npm_tag="$(printf '%s' "${prerelease}" | sed 's/[0-9].*$//' | tr '[:upper:]' '[:lower:]')"
+            if [ -z "${npm_tag}" ]; then
+              npm_tag="next"
+            fi
+          fi
+
+          echo "Publishing fileuni@${PKG_VERSION} with npm tag ${npm_tag}"
+          npm publish /tmp/npm-root/fileuni --access public --provenance --tag "${npm_tag}"
 
   build-pve-ct-template:
     needs: [resolve-matrix, build-cli]

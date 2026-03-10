@@ -80,6 +80,7 @@ The exact matrix is resolved from `.github/build_matrix.jsonc`, but the workflow
 - no `NPM_TOKEN` secret is required for npm publishing
 - the npm package settings must trust `FileUni/FileUni-Project` and the `FileUni-release.yml` workflow
 - only one npm package is published: `fileuni`
+- prerelease versions are published with a non-`latest` npm dist-tag derived from the semver prerelease label, while stable versions use `latest`
 - the package auto-detects the current platform during `postinstall`
 - Linux defaults to `gnu` when detection is ambiguous, and users can override with `FILEUNI_NPM_LIBC` or `FILEUNI_NPM_TARGET`
 
