@@ -1689,7 +1689,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for repo_dir in             /tmp/package-repos/homebrew-fileuni             /tmp/package-repos/scoop-fileuni             /tmp/package-repos/nixpkgs-fileuni
+          for repo_dir in \
+            /tmp/package-repos/homebrew-fileuni \
+            /tmp/package-repos/scoop-fileuni \
+            /tmp/package-repos/nixpkgs-fileuni
           do
             git -C "${repo_dir}" config user.name "github-actions[bot]"
             git -C "${repo_dir}" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -1702,7 +1705,14 @@ jobs:
           RELEASE_TAG: ${{ needs.resolve-matrix.outputs.release_tag }}
         run: |
           set -euo pipefail
-          python3 .github/scripts/update_package_indexes.py             --artifact-root /tmp/package-index-artifacts             --template-root .github/package-repos             --homebrew-out /tmp/package-repos/homebrew-fileuni             --scoop-out /tmp/package-repos/scoop-fileuni             --nix-out /tmp/package-repos/nixpkgs-fileuni             --version "${PKG_VERSION}"             --release-tag "${RELEASE_TAG}"
+          python3 .github/scripts/update_package_indexes.py \
+            --artifact-root /tmp/package-index-artifacts \
+            --template-root .github/package-repos \
+            --homebrew-out /tmp/package-repos/homebrew-fileuni \
+            --scoop-out /tmp/package-repos/scoop-fileuni \
+            --nix-out /tmp/package-repos/nixpkgs-fileuni \
+            --version "${PKG_VERSION}" \
+            --release-tag "${RELEASE_TAG}"
 
       - name: Push package repository updates
         shell: bash
