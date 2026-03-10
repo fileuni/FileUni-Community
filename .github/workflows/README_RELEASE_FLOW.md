@@ -103,7 +103,9 @@ The exact matrix is resolved from `.github/build_matrix.jsonc`, but the workflow
 
 ## Package Manager Repos
 
-- Homebrew tap subtree source: `HomebrewFileUni` -> `FileUni/homebrew-fileuni`
-- Scoop bucket subtree source: `ScoopFileUni` -> `FileUni/scoop-fileuni`
-- Nix package subtree source: `NixPkgsFileUni` -> `FileUni/nixpkgs-fileuni`
-- Generated metadata is committed back to `FileUni-WorkSpace` and then synced to standalone repos through `Crontab_Subtree.yml`
+- Homebrew tap repo: `FileUni/homebrew-fileuni`
+- Scoop bucket repo: `FileUni/scoop-fileuni`
+- Nix package repo: `FileUni/nixpkgs-fileuni`
+- Repository contents are generated in CI from `.github/package-repos/` templates and `.github/scripts/update_package_indexes.py`
+- `FileUni-release.yml` clones those standalone repos, regenerates their contents in a temporary workspace, and pushes updates directly
+- `Crontab_Subtree.yml` does not manage package manager repositories

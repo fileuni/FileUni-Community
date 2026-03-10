@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
+import shutil
 from pathlib import Path
 
 
@@ -162,8 +164,6 @@ def render_scoop_manifest(version: str, release_tag: str, checksums: dict[str, s
 
 
 def hex_to_sri_sha256(hex_digest: str) -> str:
-    import base64
-
     return "sha256-" + base64.b64encode(bytes.fromhex(hex_digest)).decode("ascii")
 
 
@@ -234,9 +234,55 @@ stdenvNoCC.mkDerivation {{
 '''
 
 
-def update_indexes(args: argparse.Namespace) -> int:
-    workspace_root = Path(args.workspace_root).resolve()
+def reset_directory(target_dir: Path) -> None:
+    target_dir.mkdir(parents=True, exist_ok=True)
+    for child in target_dir.iterdir():
+        if child.name == ".git":
+            continue
+        if child.is_dir():
+            shutil.rmtree(child)
+        else:
+            child.unlink()
+
+
+def copy_tree_contents(source_dir: Path, target_dir: Path) -> None:
+    for path in sorted(source_dir.rglob("*")):
+        relative = path.relative_to(source_dir)
+        destination = target_dir / relative
+        if path.is_dir():
+            destination.mkdir(parents=True, exist_ok=True)
+            continue
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, destination)
+
+
+def generate_homebrew_repo(output_dir: Path, template_root: Path, version: str, release_tag: str, checksums: dict[str, str]) -> None:
+    reset_directory(output_dir)
+    copy_tree_contents(template_root / "homebrew", output_dir)
+    formula_path = output_dir / "Formula" / "fileuni.rb"
+    formula_path.parent.mkdir(parents=True, exist_ok=True)
+    formula_path.write_text(render_formula(version, release_tag, checksums), encoding="utf-8")
+
+
+def generate_scoop_repo(output_dir: Path, template_root: Path, version: str, release_tag: str, checksums: dict[str, str]) -> None:
+    reset_directory(output_dir)
+    copy_tree_contents(template_root / "scoop", output_dir)
+    manifest_path = output_dir / "bucket" / "fileuni.json"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(render_scoop_manifest(version, release_tag, checksums), encoding="utf-8")
+
+
+def generate_nix_repo(output_dir: Path, template_root: Path, version: str, release_tag: str, checksums: dict[str, str]) -> None:
+    reset_directory(output_dir)
+    copy_tree_contents(template_root / "nix", output_dir)
+    nix_path = output_dir / "pkgs" / "fileuni-bin.nix"
+    nix_path.parent.mkdir(parents=True, exist_ok=True)
+    nix_path.write_text(render_nix_package(version, release_tag, checksums), encoding="utf-8")
+
+
+def generate_package_repos(args: argparse.Namespace) -> int:
     artifact_root = Path(args.artifact_root).resolve()
+    template_root = Path(args.template_root).resolve()
 
     checksum_targets = [
         "x86_64-apple-darwin",
@@ -248,24 +294,19 @@ def update_indexes(args: argparse.Namespace) -> int:
     ]
     checksums = {target: sha256_file(find_asset(artifact_root, target)) for target in checksum_targets}
 
-    formula_path = workspace_root / "HomebrewFileUni" / "Formula" / "fileuni.rb"
-    formula_path.parent.mkdir(parents=True, exist_ok=True)
-    formula_path.write_text(render_formula(args.version, args.release_tag, checksums), encoding="utf-8")
-
-    scoop_path = workspace_root / "ScoopFileUni" / "bucket" / "fileuni.json"
-    scoop_path.parent.mkdir(parents=True, exist_ok=True)
-    scoop_path.write_text(render_scoop_manifest(args.version, args.release_tag, checksums), encoding="utf-8")
-
-    nix_path = workspace_root / "NixPkgsFileUni" / "pkgs" / "fileuni-bin.nix"
-    nix_path.parent.mkdir(parents=True, exist_ok=True)
-    nix_path.write_text(render_nix_package(args.version, args.release_tag, checksums), encoding="utf-8")
+    generate_homebrew_repo(Path(args.homebrew_out).resolve(), template_root, args.version, args.release_tag, checksums)
+    generate_scoop_repo(Path(args.scoop_out).resolve(), template_root, args.version, args.release_tag, checksums)
+    generate_nix_repo(Path(args.nix_out).resolve(), template_root, args.version, args.release_tag, checksums)
     return 0
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Generate Homebrew, Scoop, and Nix package indexes")
-    parser.add_argument("--workspace-root", required=True)
+    parser = argparse.ArgumentParser(description="Generate Homebrew, Scoop, and Nix package repositories")
     parser.add_argument("--artifact-root", required=True)
+    parser.add_argument("--template-root", required=True)
+    parser.add_argument("--homebrew-out", required=True)
+    parser.add_argument("--scoop-out", required=True)
+    parser.add_argument("--nix-out", required=True)
     parser.add_argument("--version", required=True)
     parser.add_argument("--release-tag", required=True)
-    raise SystemExit(update_indexes(parser.parse_args()))
+    raise SystemExit(generate_package_repos(parser.parse_args()))

@@ -1638,23 +1638,6 @@ jobs:
       - name: Checkout community repo
         uses: actions/checkout@v4
 
-      - name: Checkout workspace main
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ env.WORKSPACE_REPO }}
-          ref: main
-          token: ${{ secrets.FILEUNI_WORKSPACE_PAT }}
-          path: workspace
-          fetch-depth: 0
-
-      - name: Configure git identity
-        working-directory: workspace
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
       - name: Download macOS x64 CLI artifact
         uses: actions/download-artifact@v4
         with:
@@ -1691,35 +1674,58 @@ jobs:
           name: cli-i686-pc-windows-msvc
           path: /tmp/package-index-artifacts/i686-pc-windows-msvc
 
-      - name: Generate Homebrew and Scoop indexes
+      - name: Clone package repositories
+        shell: bash
+        env:
+          FILEUNI_WORKSPACE_PAT: ${{ secrets.FILEUNI_WORKSPACE_PAT }}
+        run: |
+          set -euo pipefail
+          base_url="https://x-access-token:${FILEUNI_WORKSPACE_PAT}@github.com/FileUni"
+          git clone --depth 1 "${base_url}/homebrew-fileuni.git" /tmp/package-repos/homebrew-fileuni
+          git clone --depth 1 "${base_url}/scoop-fileuni.git" /tmp/package-repos/scoop-fileuni
+          git clone --depth 1 "${base_url}/nixpkgs-fileuni.git" /tmp/package-repos/nixpkgs-fileuni
+
+      - name: Configure git identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          for repo_dir in             /tmp/package-repos/homebrew-fileuni             /tmp/package-repos/scoop-fileuni             /tmp/package-repos/nixpkgs-fileuni
+          do
+            git -C "${repo_dir}" config user.name "github-actions[bot]"
+            git -C "${repo_dir}" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          done
+
+      - name: Generate package repositories
         shell: bash
         env:
           PKG_VERSION: ${{ needs.resolve-matrix.outputs.publish_version }}
           RELEASE_TAG: ${{ needs.resolve-matrix.outputs.release_tag }}
         run: |
           set -euo pipefail
-          python3 .github/scripts/update_package_indexes.py \
-            --workspace-root workspace \
-            --artifact-root /tmp/package-index-artifacts \
-            --version "${PKG_VERSION}" \
-            --release-tag "${RELEASE_TAG}"
-          git -C workspace diff -- HomebrewFileUni ScoopFileUni NixPkgsFileUni || true
+          python3 .github/scripts/update_package_indexes.py             --artifact-root /tmp/package-index-artifacts             --template-root .github/package-repos             --homebrew-out /tmp/package-repos/homebrew-fileuni             --scoop-out /tmp/package-repos/scoop-fileuni             --nix-out /tmp/package-repos/nixpkgs-fileuni             --version "${PKG_VERSION}"             --release-tag "${RELEASE_TAG}"
 
-      - name: Commit package index updates to workspace
-        working-directory: workspace
+      - name: Push package repository updates
         shell: bash
-        env:
-          FILEUNI_WORKSPACE_PAT: ${{ secrets.FILEUNI_WORKSPACE_PAT }}
         run: |
           set -euo pipefail
-          if [ -z "$(git status --porcelain -- HomebrewFileUni ScoopFileUni NixPkgsFileUni)" ]; then
-            echo "No Homebrew/Scoop changes detected."
-            exit 0
-          fi
 
-          git add HomebrewFileUni ScoopFileUni NixPkgsFileUni
-          git commit -m "chore(release): update brew, scoop, and nix indexes for ${{ needs.resolve-matrix.outputs.publish_version }}"
-          git push "https://x-access-token:${FILEUNI_WORKSPACE_PAT}@github.com/${{ env.WORKSPACE_REPO }}.git" HEAD:main
+          commit_and_push() {
+            local repo_dir="$1"
+            local message="$2"
+
+            if [ -z "$(git -C "${repo_dir}" status --porcelain)" ]; then
+              echo "No changes for ${repo_dir}"
+              return 0
+            fi
+
+            git -C "${repo_dir}" add .
+            git -C "${repo_dir}" commit -m "${message}"
+            git -C "${repo_dir}" push origin HEAD:main
+          }
+
+          commit_and_push /tmp/package-repos/homebrew-fileuni "chore(release): update formula for ${{ needs.resolve-matrix.outputs.publish_version }}"
+          commit_and_push /tmp/package-repos/scoop-fileuni "chore(release): update manifest for ${{ needs.resolve-matrix.outputs.publish_version }}"
+          commit_and_push /tmp/package-repos/nixpkgs-fileuni "chore(release): update package for ${{ needs.resolve-matrix.outputs.publish_version }}"
 
   publish-npm:
     needs: [resolve-matrix, publish]
