@@ -34,6 +34,8 @@ The main development workspace lives in the private monorepo and selected compon
 - [OfficialSiteDocs](https://github.com/FileUni/OfficialSiteDocs)
 - [OfficialSitePrivate](https://github.com/FileUni/OfficialSitePrivate)
 - [yh-filemanager-vfs-storage-hub](https://github.com/FileUni/yh-filemanager-vfs-storage-hub)
+- [homebrew-fileuni](https://github.com/FileUni/homebrew-fileuni)
+- [scoop-fileuni](https://github.com/FileUni/scoop-fileuni)
 
 ## Source Availability
 
