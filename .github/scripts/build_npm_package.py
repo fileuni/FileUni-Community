@@ -127,7 +127,7 @@ def build_package(args: argparse.Namespace) -> int:
             "LICENSE",
         ],
         "bin": {
-            "fileuni": "./bin/fileuni.js"
+            "fileuni": "bin/fileuni.js"
         },
         "scripts": {
             "postinstall": "node ./scripts/postinstall.cjs"
