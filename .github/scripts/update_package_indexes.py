@@ -263,7 +263,7 @@ def update_indexes(args: argparse.Namespace) -> int:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Generate Homebrew and Scoop package indexes")
+    parser = argparse.ArgumentParser(description="Generate Homebrew, Scoop, and Nix package indexes")
     parser.add_argument("--workspace-root", required=True)
     parser.add_argument("--artifact-root", required=True)
     parser.add_argument("--version", required=True)
