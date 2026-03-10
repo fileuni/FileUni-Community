@@ -84,4 +84,6 @@ jobs:
           push_subtree "OfficialSiteDocs" "FileUni/OfficialSiteDocs"
           push_subtree "frontends" "FileUni/frontends"
           push_subtree "OfficialSitePrivate" "FileUni/OfficialSitePrivate"
+          push_subtree "HomebrewFileUni" "FileUni/homebrew-fileuni"
+          push_subtree "ScoopFileUni" "FileUni/scoop-fileuni"
           push_subtree "crates/yh-filemanager-vfs-storage-hub" "FileUni/yh-filemanager-vfs-storage-hub"

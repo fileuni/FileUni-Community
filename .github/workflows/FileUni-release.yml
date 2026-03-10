@@ -1606,6 +1606,103 @@ jobs:
           push: true
           tags: ${{ steps.docker-tags.outputs.debian }}
 
+  update-package-indexes:
+    needs: [resolve-matrix, publish]
+    if: ${{
+      !cancelled() &&
+      needs.resolve-matrix.outputs.build_mode == 'full' &&
+      needs.resolve-matrix.outputs.has_cli == 'true' &&
+      github.event.inputs.trigger_mode == 'tag' &&
+      needs.publish.result == 'success'
+      }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout community repo
+        uses: actions/checkout@v4
+
+      - name: Checkout workspace main
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.WORKSPACE_REPO }}
+          ref: main
+          token: ${{ secrets.FILEUNI_WORKSPACE_PAT }}
+          path: workspace
+          fetch-depth: 0
+
+      - name: Configure git identity
+        working-directory: workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Download macOS x64 CLI artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: cli-x86_64-apple-darwin
+          path: /tmp/package-index-artifacts/x86_64-apple-darwin
+
+      - name: Download macOS arm64 CLI artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: cli-aarch64-apple-darwin
+          path: /tmp/package-index-artifacts/aarch64-apple-darwin
+
+      - name: Download Linux x64 GNU CLI artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: cli-x86_64-unknown-linux-gnu
+          path: /tmp/package-index-artifacts/x86_64-unknown-linux-gnu
+
+      - name: Download Linux arm64 GNU CLI artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: cli-aarch64-unknown-linux-gnu
+          path: /tmp/package-index-artifacts/aarch64-unknown-linux-gnu
+
+      - name: Download Windows x64 CLI artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: cli-x86_64-pc-windows-msvc
+          path: /tmp/package-index-artifacts/x86_64-pc-windows-msvc
+
+      - name: Download Windows x86 CLI artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: cli-i686-pc-windows-msvc
+          path: /tmp/package-index-artifacts/i686-pc-windows-msvc
+
+      - name: Generate Homebrew and Scoop indexes
+        shell: bash
+        env:
+          PKG_VERSION: ${{ needs.resolve-matrix.outputs.pkg_version }}
+          RELEASE_TAG: ${{ needs.resolve-matrix.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/update_package_indexes.py \
+            --workspace-root workspace \
+            --artifact-root /tmp/package-index-artifacts \
+            --version "${PKG_VERSION}" \
+            --release-tag "${RELEASE_TAG}"
+          git -C workspace diff -- HomebrewFileUni ScoopFileUni || true
+
+      - name: Commit package index updates to workspace
+        working-directory: workspace
+        shell: bash
+        env:
+          FILEUNI_WORKSPACE_PAT: ${{ secrets.FILEUNI_WORKSPACE_PAT }}
+        run: |
+          set -euo pipefail
+          if [ -z "$(git status --porcelain -- HomebrewFileUni ScoopFileUni)" ]; then
+            echo "No Homebrew/Scoop changes detected."
+            exit 0
+          fi
+
+          git add HomebrewFileUni ScoopFileUni
+          git commit -m "chore(release): update brew and scoop indexes for ${{ needs.resolve-matrix.outputs.pkg_version }}"
+          git push "https://x-access-token:${FILEUNI_WORKSPACE_PAT}@github.com/${{ env.WORKSPACE_REPO }}.git" HEAD:main
+
   publish-npm:
     needs: [resolve-matrix, publish]
     if: ${{

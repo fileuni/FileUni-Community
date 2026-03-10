@@ -49,7 +49,8 @@ Important `workflow_dispatch` inputs:
 3. **build-cli** — Build CLI artifacts across cargo-dist, cross, Android, BSD, and package formats
 4. **build-gui** — Build GUI artifacts across desktop Tauri, Android, and iOS paths
 5. **publish** — Collect standardized `FileUni-*` artifacts, generate release notes, and publish the GitHub Release
-6. **publish-npm** — Build and publish the single `fileuni` npm package after the GitHub Release is available
+6. **update-package-indexes** — Update Homebrew tap and Scoop bucket sources in WorkSpace after a tag release
+7. **publish-npm** — Build and publish the single `fileuni` npm package after the GitHub Release is available
 
 ## Artifact Naming
 
@@ -67,6 +68,8 @@ The exact matrix is resolved from `.github/build_matrix.jsonc`, but the workflow
 - CLI FreeBSD builds
 - Linux package builds via nFPM
 - npm single-package distribution for Linux `gnu` / `musl`, Windows, macOS, Android, and FreeBSD
+- Homebrew tap updates for macOS and Linux CLI assets
+- Scoop bucket updates for Windows CLI assets
 - GUI desktop Tauri builds
 - GUI Android APK builds
 - GUI iOS IPA packaging
@@ -74,6 +77,7 @@ The exact matrix is resolved from `.github/build_matrix.jsonc`, but the workflow
 ## npm Publish Rules
 
 - npm publish is enabled only when `build_mode=full`
+- Homebrew and Scoop index updates run only for `trigger_mode=tag` releases
 - npm publish requires CLI builds to be enabled
 - npm publish runs after the GitHub Release has been published, because the npm package downloads release assets by `release_tag`
 - npm publish uses npm Trusted Publisher with GitHub Actions OIDC
@@ -95,3 +99,9 @@ The exact matrix is resolved from `.github/build_matrix.jsonc`, but the workflow
 
 - The upstream dispatch workflow uses `ref: main` for the workflow file version, while `workspace_ref` controls which WorkSpace source ref is checked out and built.
 - CLI remains friendly to cross-compilation, while GUI release jobs include platform-specific packaging steps.
+
+## Package Manager Repos
+
+- Homebrew tap subtree source: `HomebrewFileUni` -> `FileUni/homebrew-fileuni`
+- Scoop bucket subtree source: `ScoopFileUni` -> `FileUni/scoop-fileuni`
+- Generated metadata is committed back to `FileUni-WorkSpace` and then synced to standalone repos through `Crontab_Subtree.yml`
