@@ -7,6 +7,11 @@ on:
         description: "Source ref in FileUni-WorkSpace (branch/tag/sha). Default: main"
         required: false
         default: "main"
+      force_push:
+        description: "Force push subtrees when workspace history was rewritten (e.g., git push -f)"
+        required: false
+        default: "false"
+        type: boolean
   schedule:
     - cron: "35 */1 * * *"
 
@@ -58,11 +63,13 @@ jobs:
         working-directory: workspace
         env:
           FILEUNI_WORKSPACE_PAT: ${{ secrets.FILEUNI_WORKSPACE_PAT }}
+          FORCE_PUSH: ${{ github.event.inputs.force_push }}
         shell: bash
         run: |
           set -euo pipefail
 
           workspace_token="${FILEUNI_WORKSPACE_PAT:-}"
+          force_push="${FORCE_PUSH:-false}"
           if [ -z "${workspace_token}" ]; then
             echo "::error::missing FILEUNI_WORKSPACE_PAT"
             exit 1
@@ -71,12 +78,28 @@ jobs:
           push_subtree() {
             local prefix="$1"
             local repo="$2"
+            local remote_url="https://x-access-token:${workspace_token}@github.com/${repo}.git"
 
             echo "::group::subtree push ${prefix} -> ${repo}"
-            git subtree push \
-              --prefix="${prefix}" \
-              "https://x-access-token:${workspace_token}@github.com/${repo}.git" \
-              main
+
+            if [ "${force_push}" = "true" ]; then
+              echo "::warning::force_push enabled; rewriting ${repo}:main to match workspace"
+
+              split_sha="$(git subtree split --prefix="${prefix}")"
+              remote_main_sha="$(git ls-remote "${remote_url}" refs/heads/main | cut -f1)"
+
+              if [ -z "${remote_main_sha}" ]; then
+                git push "${remote_url}" "${split_sha}:refs/heads/main"
+              else
+                git push "${remote_url}" "${split_sha}:refs/heads/main" \
+                  --force-with-lease=refs/heads/main:"${remote_main_sha}"
+              fi
+            else
+              git subtree push \
+                --prefix="${prefix}" \
+                "${remote_url}" \
+                main
+            fi
             echo "::endgroup::"
           }
 
